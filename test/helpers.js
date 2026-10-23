@@ -22,7 +22,7 @@ const freePort = () => new Promise((resolve, reject) => {
  */
 export async function startServer(vars = {}) {
   const port = await freePort();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-worker-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflix-worker-'));
   const args = [WRANGLER, 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', dir, '--inspector-port', '0', '--test-scheduled'];
   // Tests never touch the real internet: with no catalog source given, every country's catalog is simply "not built".
   for (const [k, v] of Object.entries({ CATALOG_BASE: 'http://127.0.0.1:9/none', ...vars })) args.push('--var', `${k}:${v}`);

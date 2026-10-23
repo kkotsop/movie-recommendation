@@ -1,4 +1,4 @@
-// SwipeFlick on Cloudflare Workers (free plan).
+// Swipeflix on Cloudflare Workers (free plan).
 //
 // The phone does the recommending: it downloads a country's catalog and scores it against the person's
 // own history and swipes, so none of that ever reaches a server. This Worker only does the few things a

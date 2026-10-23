@@ -1,6 +1,6 @@
 // Everything personal lives here, on this device: your Netflix history, swipes and settings.
 // Recommendations are worked out on this device too, so none of it is ever sent anywhere.
-const KEY = 'swipeflick.v1';
+const KEY = 'swipeflix.v1';
 
 const blank = () => ({
   v: 1,

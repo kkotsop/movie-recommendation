@@ -1,6 +1,6 @@
 // The "Sync from Netflix" bookmark. It runs on netflix.com/viewingactivity in your phone's own
 // browser, where you are already logged in, so your password never goes anywhere. It reads the
-// list (the "Download all" file, or the page itself as a fallback) and opens SwipeFlick with the
+// list (the "Download all" file, or the page itself as a fallback) and opens Swipeflix with the
 // rows in the URL fragment. Fragments are never sent to a server, and opening your app is a plain
 // navigation, so Netflix's content-security rules can't block it.
 //
@@ -21,7 +21,7 @@ export async function netflixExport(appUrl) {
 
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483647;padding:14px;background:#14d9c4;color:#0e1014;font:700 15px system-ui;text-align:center';
-  banner.textContent = 'SwipeFlick: reading your viewing activity…';
+  banner.textContent = 'Swipeflix: reading your viewing activity…';
   document.body.appendChild(banner);
 
   let csv = null;
@@ -39,7 +39,7 @@ export async function netflixExport(appUrl) {
       const more = [...document.querySelectorAll('button')].find((b) => /show more/i.test(b.textContent)) || document.querySelector('.viewing-activity-footer button');
       if (!more || more.disabled || more.offsetParent === null) break;
       more.click();
-      if ((i & 3) === 0) banner.textContent = `SwipeFlick: reading your viewing activity… (${document.querySelectorAll('li.retableRow').length} so far)`;
+      if ((i & 3) === 0) banner.textContent = `Swipeflix: reading your viewing activity… (${document.querySelectorAll('li.retableRow').length} so far)`;
       await wait(700);
     }
     const rows = [...document.querySelectorAll('li.retableRow')].map((li) => [
@@ -48,7 +48,7 @@ export async function netflixExport(appUrl) {
     ]).filter((r) => r[1]);
     if (!rows.length) {
       banner.remove();
-      alert('SwipeFlick could not find any viewing activity on this page. Make sure the right profile is selected, or Netflix has changed this page.');
+      alert('Swipeflix could not find any viewing activity on this page. Make sure the right profile is selected, or Netflix has changed this page.');
       return;
     }
     csv = 'Title,Date\n' + rows.map(([d, t]) => `"${t.replace(/"/g, '""')}","${d}"`).join('\n');
@@ -56,7 +56,7 @@ export async function netflixExport(appUrl) {
 
   const lines = csv.split(/\r?\n/); /* newest first; keep it small enough for a URL */
   csv = [lines[0], ...lines.slice(1, 2001)].join('\n');
-  banner.textContent = 'SwipeFlick: opening your app…';
+  banner.textContent = 'Swipeflix: opening your app…';
   location.href = `${appUrl}/#import=${btoa(unescape(encodeURIComponent(csv)))}`;
 }
 

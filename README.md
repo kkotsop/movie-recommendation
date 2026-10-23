@@ -1,8 +1,8 @@
-# SwipeFlick 🔥🍿
+# Swipeflix 🍿
 
 **Tinder for your Netflix queue.** A local app that reads your Netflix viewing history, looks at what's on Netflix in your country along with IMDb ratings, and deals you one title at a time. **Swipe right** and you'll see more like it. **Swipe left** and it never comes back.
 
-**Your history and swipes stay on your own phone.** Recommendations are worked out there, so your viewing history is never sent to a server, and SwipeFlick never asks for, sees or stores a Netflix password. No account to make, no tracking. Free to run.
+**Your history and swipes stay on your own phone.** Recommendations are worked out there, so your viewing history is never sent to a server, and Swipeflix never asks for, sees or stores a Netflix password. No account to make, no tracking. Free to run.
 
 <p align="center"><img src="docs/swipe.png" width="260" alt="Swiping right on a card"> <img src="docs/lucky.png" width="260" alt="I'm feeling lucky result"> <img src="docs/settings.png" width="260" alt="Discovery settings"></p>
 
@@ -45,7 +45,7 @@ Which countries? All of those listed in `public/lib/regions.js`. A country with 
 ```bash
 npm install
 npx wrangler login          # opens your browser once
-npm run deploy              # prints your URL: https://swipeflick.<you>.workers.dev
+npm run deploy              # prints your URL: https://swipeflix.<you>.workers.dev
 ```
 That's it for the app. Everything it uses (static files, one Durable Object) is on Cloudflare's free plan and needs no payment method.
 
@@ -76,7 +76,7 @@ npm install
 npm start            # → http://localhost:8787  (the real Cloudflare Worker runtime, running locally)
 ```
 
-Requires Node 20+. With no catalogs published it uses the built-in sample. To try a real catalog locally: `TMDB_API_KEY=your-key REGIONS=US npm run catalogs`, then serve `data-out/` with any static server and set `CATALOG_BASE` (in `wrangler.jsonc`, or `npx wrangler dev --var CATALOG_BASE:http://localhost:9000/catalog`).
+Requires Node 22+ (Wrangler needs it). With no catalogs published it uses the built-in sample. To try a real catalog locally: `TMDB_API_KEY=your-key REGIONS=US npm run catalogs`, then serve `data-out/` with any static server and set `CATALOG_BASE` (in `wrangler.jsonc`, or `npx wrangler dev --var CATALOG_BASE:http://localhost:9000/catalog`).
 
 ### Where each person's data lives
 
@@ -88,22 +88,22 @@ Each installed app keeps **its own** Netflix history, swipes and settings in the
 
 ## Getting your Netflix history in
 
-Netflix has no public API and SwipeFlick never asks for your password, so history comes in through **your own signed-in browser**:
+Netflix has no public API and Swipeflix never asks for your password, so history comes in through **your own signed-in browser**:
 
-1. **Sync from Netflix (bookmark).** *Sync from Netflix* shows a one-time bookmark to save (iPhone: do it in **Safari**; Android: Chrome). Open *netflix.com/viewingactivity*, sign in, pick your profile, and tap the bookmark. It reads the same list "Download all" gives you, inside your browser, and brings it back to SwipeFlick. Netflix's password and session never leave netflix.com.
+1. **Sync from Netflix (bookmark).** *Sync from Netflix* shows a one-time bookmark to save (iPhone: do it in **Safari**; Android: Chrome). Open *netflix.com/viewingactivity*, sign in, pick your profile, and tap the bookmark. It reads the same list "Download all" gives you, inside your browser, and brings it back to Swipeflix. Netflix's password and session never leave netflix.com.
 2. **Upload the CSV** (*Profile → Upload CSV*): on netflix.com go to *Account → Profiles → your profile → Viewing activity → Download all*.
 
 The parser handles US and European date formats and groups episodes into shows ("Dark: Season 2: …" becomes *Dark*). It recognises season markers in English, Greek, German, French, Spanish, Italian and other languages.
 
 > Netflix can change its Viewing activity page at any time, which would break the bookmark's page-reading fallback (the CSV upload keeps working). The bookmark has only been tested against a stand-in page, not netflix.com itself. Netflix's terms don't allow automated access, so use the sync at your own discretion.
 
-## How Tinder works, and how SwipeFlick copies it
+## How Tinder works, and how Swipeflix copies it
 
 I took Tinder apart from its public behaviour: the app and web UI, its keyboard shortcuts, and what Tinder has said publicly about its matching. This app has no Tinder code or assets.
 
 ### The UX
 
-| Tinder | SwipeFlick |
+| Tinder | Swipeflix |
 |---|---|
 | A stack of full-bleed photo cards. The next card waits behind at ~95% scale and grows as you drag the top one | Same. The poster is the "photo" and the next card scales from 0.95 to 1 as you drag |
 | The card follows your finger and rotates around the grab point (it tilts the opposite way if you grab the bottom half) | Same rotation rule (±22°, flipped for bottom-half grabs) |
@@ -125,7 +125,7 @@ I took Tinder apart from its public behaviour: the app and web UI, its keyboard 
 
 Tinder used to rank people with an **Elo-style "desirability" score**. It now says it relies mostly on **your own activity**: what you swipe on, recency, and your preferences, plus some **exploration** so the stack doesn't get stale. Cards come in **small batches**, ranked with some randomness, and anything you've swiped is never shown again.
 
-SwipeFlick does the same, but for titles, in `src/recommender.js`:
+Swipeflix does the same, but for titles, in `src/recommender.js`:
 
 1. **Every title is a feature vector**: genres, keywords, director/creator, top cast, original language, decade, movie/series.
 2. **Your taste is one vector too.** It starts from your Netflix history, where each show is weighted by **recency** (one-year half-life) × **engagement** (1 + log₂ of episodes watched). Then every swipe updates it: Like adds the title's features, Must watch adds them twice, Nope subtracts 0.7× and hides that title forever. The whole history counts about as much as 4 likes, so a few swipes quickly steer the deck.
@@ -167,6 +167,6 @@ test/                  unit, builder, Worker and browser end-to-end tests
 npm test      # runs the real Worker locally; no Cloudflare account or TMDB key needed
 ```
 
-The tests start the actual Worker in Wrangler's local runtime and a fake TMDB/IMDb server, so they cover the catalog build, the Worker, the engine, privacy guarantees and offline use. The browser tests drive Chrome, Edge or Playwright's Chromium and skip themselves if none is installed. CI (`.github/workflows/test.yml`) runs everything on Node 20 and 24.
+The tests start the actual Worker in Wrangler's local runtime and a fake TMDB/IMDb server, so they cover the catalog build, the Worker, the engine, privacy guarantees and offline use. The browser tests drive Chrome, Edge or Playwright's Chromium and skip themselves if none is installed. CI (`.github/workflows/test.yml`) runs everything on Node 22 and 24.
 
 Not affiliated with Netflix, IMDb, TMDB or Tinder.

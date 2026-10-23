@@ -16,7 +16,7 @@ let srv, context, page;
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 };
 
 /** What this phone has saved: the app keeps everything in the browser, not on the server. */
-const saved = (p = page) => p.evaluate(() => JSON.parse(localStorage.getItem('swipeflick.v1') || 'null'));
+const saved = (p = page) => p.evaluate(() => JSON.parse(localStorage.getItem('swipeflix.v1') || 'null'));
 const stats = async (p = page) => {
   const swipes = (await saved(p))?.swipes || [];
   const n = (a) => swipes.filter((s) => s.action === a).length;
@@ -54,10 +54,10 @@ test('arrow keys like and nope the top card, backspace rewinds', { skip }, async
   await page.waitForFunction(() => document.querySelector('#likes-badge') && !document.querySelector('#likes-badge').hidden);
   assert.equal((await stats()).likes, 1);
   await page.keyboard.press('ArrowLeft');
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 2);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 2);
   assert.equal((await stats()).nopes, 1);
   await page.keyboard.press('Backspace');
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 1);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 1);
   assert.equal((await stats()).nopes, 0);
 });
 
@@ -133,7 +133,7 @@ test('settings sheet filters the deck to series', { skip }, async () => {
   await page.locator('#btn-filters').click();
   await page.locator('#types [data-types="series"]').click();
   await page.locator('#sheet-filters [data-close]').last().click();
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).settings.types === 'series');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).settings.types === 'series');
   await page.locator('#deck .card').first().waitFor();
   const types = await page.$$eval('#deck .card .card-info, #deck .card', (els) => els.length);
   assert.ok(types >= 1);
@@ -155,7 +155,7 @@ test('About & credits carries the TMDB attribution, and there is no TMDB key fie
 test('reset swipes clears the counters', { skip }, async () => {
   await page.locator('#btn-filters').click();
   await page.locator('#sheet-filters [data-action="reset"]').click();
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 0);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 0);
   const s = await stats();
   assert.deepEqual([s.likes, s.supers, s.nopes], [0, 0, 0]);
 });
@@ -179,7 +179,7 @@ test('two people on the same server have completely separate data', { skip }, as
       await p.locator('#deck .card').first().waitFor();
     }
     await a.p.keyboard.press('ArrowRight');
-    await a.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 1);
+    await a.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 1);
     assert.equal((await stats(a.p)).likes, 1);
     assert.equal((await stats(b.p)).likes, 0, "B can't see A's swipes");
     await b.p.reload();
@@ -197,7 +197,7 @@ test("Move your data: a code carries one device's history and swipes to another"
     await a.p.locator('#deck .card').first().waitFor();
     await a.p.keyboard.press('ArrowRight');
     await a.p.keyboard.press('ArrowRight');
-    await a.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 2);
+    await a.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 2);
     await a.p.locator('[data-tab="profile"]').click();
     await a.p.locator('#open-transfer').click();
     await a.p.locator('#transfer-send').click();
@@ -211,7 +211,7 @@ test("Move your data: a code carries one device's history and swipes to another"
     await b.p.locator('#open-transfer').click();
     await b.p.locator('#transfer-input').fill(code);
     await b.p.locator('#transfer-claim').click();
-    await b.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 2);
+    await b.p.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 2);
     assert.equal((await stats(b.p)).likes, 2);
 
     await b.p.locator('#open-transfer').click();

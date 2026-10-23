@@ -1,12 +1,12 @@
-// SwipeFlick service worker: the app opens instantly, and everything works offline once it has been used.
+// Swipeflix service worker: the app opens instantly, and everything works offline once it has been used.
 //  - app shell + demo catalog: cached on install, refreshed in the background on every visit
 //  - country catalogs (/api/catalog/XX, not personal): cached, refreshed in the background
 //  - posters (TMDB images): cached the first time they are seen
 //  - everything else under /api (history lookups, transfer codes) always goes straight to the network
 const VERSION = 'v9';
-const SHELL = `swipeflick-shell-${VERSION}`;
-const CATALOGS = `swipeflick-catalogs-${VERSION}`;
-const IMAGES = `swipeflick-images-${VERSION}`;
+const SHELL = `swipeflix-shell-${VERSION}`;
+const CATALOGS = `swipeflix-catalogs-${VERSION}`;
+const IMAGES = `swipeflix-images-${VERSION}`;
 const MAX_IMAGES = 300;
 const SHELL_FILES = [
   '/', '/app.css', '/app.js', '/netflix-export.js', '/device-store.js',

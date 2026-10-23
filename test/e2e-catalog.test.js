@@ -15,7 +15,7 @@ try {
 const skip = browser ? false : 'no browser available (install Chrome or run `npx playwright install chromium`)';
 
 let fake, files, srv, context, page;
-const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('swipeflick.v1') || 'null'));
+const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('swipeflix.v1') || 'null'));
 
 before(async () => {
   if (skip) return;
@@ -52,7 +52,7 @@ test('swiping and recommendations work with no connection once the app has been 
     await page.locator('#deck .card').first().waitFor();
     assert.match(await page.locator('#deck .card').first().locator('.card-info h2').first().innerText(), /^(Movie|Series) \d+/, 'still the real catalog, from the phone');
     await page.keyboard.press('ArrowRight');
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflick.v1')).swipes.length === 1);
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('swipeflix.v1')).swipes.length === 1);
     await page.keyboard.press('l');
     await page.getByText("It's a Pick!").waitFor();
     await page.getByRole('button', { name: /keep swiping/i }).click();

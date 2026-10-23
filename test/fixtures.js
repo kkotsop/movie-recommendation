@@ -55,7 +55,7 @@ export async function fakeTmdbServer() {
 }
 
 /** Builds real catalog files with the real builder against the fake TMDB. Returns the output folder. */
-export async function buildFixtureCatalogs(fake, regions = ['US'], { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-catalogs-')), previous, now } = {}) {
+export async function buildFixtureCatalogs(fake, regions = ['US'], { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflix-catalogs-')), previous, now } = {}) {
   const catalogs = await buildCatalogs({
     tmdb: createTmdb('k', undefined, fake.base), regions, previous, now,
     ratings: (ids) => imdbRatings(ids, { url: fake.imdbUrl, retryMs: 1 }),

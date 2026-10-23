@@ -1,4 +1,4 @@
-// SwipeFlick client: Tinder's card stack, gestures and screens for movies & series.
+// Swipeflix client: Tinder's card stack, gestures and screens for movies & series.
 import { bookmarkletFor } from './netflix-export.js';
 import * as device from './device-store.js';
 import * as engine from './lib/engine.js';
@@ -987,7 +987,7 @@ function toast(msg) {
 
 function hideCoach() {
   $('#coach').hidden = true;
-  try { localStorage.setItem('swipeflick.coach', '1'); } catch {}
+  try { localStorage.setItem('swipeflix.coach', '1'); } catch {}
 }
 
 document.addEventListener('click', (e) => {
@@ -1049,7 +1049,7 @@ async function init() {
   await importFromHash();
   await refill(true);
   let seenCoach = false;
-  try { seenCoach = Boolean(localStorage.getItem('swipeflick.coach')); } catch {}
+  try { seenCoach = Boolean(localStorage.getItem('swipeflix.coach')); } catch {}
   if (!seenCoach) {
     $('#coach').hidden = false;
     setTimeout(hideCoach, 9000);

@@ -1,5 +1,5 @@
 {
-  "name": "swipeflick",
+  "name": "swipeflix",
   "version": "1.0.0",
   "description": "Swipe through Netflix recommendations built from your own viewing history and IMDb ratings. Your data stays on your phone. Runs on Cloudflare.",
   "type": "module",
@@ -12,7 +12,7 @@
     "catalogs": "node scripts/build-catalogs.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "license": "MIT",
   "devDependencies": {
