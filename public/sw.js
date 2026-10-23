@@ -3,7 +3,7 @@
 //  - posters (TMDB images): cached the first time they are seen
 //  - /api GET: network first, last good answer when offline
 //  - everything else (POST swipes, etc.) goes straight to the network
-const VERSION = 'v2';
+const VERSION = 'v4';
 const SHELL = `swipeflick-shell-${VERSION}`;
 const IMAGES = `swipeflick-images-${VERSION}`;
 const API = `swipeflick-api-${VERSION}`;

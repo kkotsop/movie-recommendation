@@ -34,6 +34,8 @@ a { color: var(--brand-a); }
 /* ---------- top bar ---------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 14px 6px; flex: none; }
 .logo, .welcome-logo { display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 26px; letter-spacing: -1px; }
+.logo span b { font-weight: 800; }
+.logo span, .welcome-logo span { font-weight: 500; }
 .logo span { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .logo-mark { width: 30px; height: 30px; color: var(--brand-a); }
 .logo .logo-mark, .tab.on[data-tab="discover"] svg { --spark-fill: url(#g-brand); }
@@ -119,6 +121,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: va
 .act:hover { transform: scale(1.08); }
 .act:active, .act.pressed { transform: scale(.9); }
 .act:disabled { opacity: .35; pointer-events: none; }
+.act-rewind { position: absolute; left: 16px; top: 50%; margin-top: -11px; width: 44px; height: 44px; }
+.act-rewind:disabled { opacity: 0; } /* only there when there is something to undo */
 .act-rewind { color: var(--rewind); }
 .act-nope { color: var(--nope); }
 .act-super { color: var(--super); }
@@ -131,13 +135,12 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: va
 .act-like.lit { background: var(--like); }
 .act-lucky.lit { background: var(--lucky); }
 .coach {
-  position: absolute; bottom: calc(100% - 4px); right: 4px; background: var(--lucky); color: #fff; font-size: 13px; padding: 8px 12px;
+  position: absolute; bottom: calc(100% - 4px); left: 0; right: 0; margin: 0 auto; width: max-content; background: var(--lucky); color: #fff; font-size: 13px; padding: 8px 12px;
   border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); animation: bob 1.6s ease-in-out infinite; white-space: nowrap; z-index: 10;
 }
-.coach::after { content: ""; position: absolute; top: 100%; right: 22px; border: 7px solid transparent; border-top-color: var(--lucky); }
+.coach::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -7px; border: 7px solid transparent; border-top-color: var(--lucky); }
 @keyframes bob { 50% { transform: translateY(-4px); } }
 
-.keys { display: none; }
 
 /* ---------- radar (loading / out of cards) ---------- */
 .radar { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
@@ -303,7 +306,6 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
   body { background: radial-gradient(circle at 50% -20%, #1a1f2b, var(--bg) 60%); }
   .app { max-width: 460px; }
   .view-discover { padding: 0 0 0; }
-  .keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; padding: 2px 0 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; }
   kbd { display: inline-block; min-width: 20px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: inherit; text-align: center; margin-right: 3px; box-shadow: 0 2px 0 #000; }
 }
 @media (max-height: 640px) {
@@ -331,3 +333,10 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .sync-code { width: 100%; box-sizing: border-box; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 11px/1.3 ui-monospace, monospace; padding: 8px; resize: none; }
 .sync-note { font-size: 13px; }
 #lock { z-index: 60; }
+.privacy-note { margin: 18px 0 0; padding: 10px 14px; border-radius: 12px; background: rgba(0, 0, 0, .22); font-size: 13px; line-height: 1.45; text-align: left; }
+.privacy-note-sheet { background: var(--surface-2); color: var(--text); margin: 14px 0 0; }
+.view-daily .view-head { justify-content: flex-start; }
+.view-daily .view-head h1 { flex: 1; margin: 0; }
+.about h3 { margin: 16px 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.about p { margin: 0 0 8px; line-height: 1.5; }
+.about a { color: var(--brand-a); }

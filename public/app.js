@@ -235,7 +235,7 @@ function paintDrag(el, dx, dy, grabTop) {
   $('.stamp-super', el).style.opacity = sup;
   $('.act-like').classList.toggle('lit', !sup && like > 0.6);
   $('.act-nope').classList.toggle('lit', !sup && nope > 0.6);
-  $('.act-super').classList.toggle('lit', sup > 0.6);
+  $('.act-super')?.classList.toggle('lit', sup > 0.6);
   const next = S.queue[1] && cardEl(S.queue[1].id);
   if (next) {
     next.style.transition = 'none';
@@ -717,7 +717,10 @@ function renderProfile() {
 
   $('#catalog-info').textContent = st.catalog.source === 'tmdb'
     ? `Netflix ${REGIONS[st.settings.region] || st.settings.region} via TMDB: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
-    : `Built-in sample: ${st.catalog.count} Netflix originals with IMDb ratings. Add a free TMDB API key to swipe everything on Netflix in your country, with posters.`;
+    : st.features.tmdbKeyEditable
+      ? `Built-in sample: ${st.catalog.count} Netflix originals with IMDb ratings. Add a free TMDB API key to swipe everything on Netflix in your country, with posters.`
+      : `The full Netflix catalog is still loading. Until then you can swipe a sample of ${st.catalog.count} Netflix originals.`;
+  $('#tmdb-setup').hidden = !st.features.tmdbKeyEditable;
   $('#tmdb-key').placeholder = st.settings.hasTmdbKey ? '•••••••• (saved — paste a new one to replace)' : 'Paste your TMDB API key or read access token';
   renderJobs();
 }
@@ -759,6 +762,7 @@ $('#catalog-refresh').addEventListener('click', async () => {
   await api.post('/api/catalog/refresh');
   startPolling();
 });
+$('#open-about').addEventListener('click', () => openSheet('#sheet-about'));
 $('#reset-swipes').addEventListener('click', resetSwipes);
 $('#reset-all').addEventListener('click', resetAll);
 
@@ -969,7 +973,8 @@ document.addEventListener('click', (e) => {
   else if (a === 'reset') resetSwipes();
 });
 $('#btn-filters').addEventListener('click', () => openSheet('#sheet-filters'));
-$('#btn-reset').addEventListener('click', resetSwipes);
+$('#btn-daily').addEventListener('click', () => showTab('daily'));
+$('#daily-back').addEventListener('click', () => showTab('discover'));
 
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;

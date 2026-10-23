@@ -55,7 +55,7 @@ SwipeFlick is a PWA: open it in your phone's browser and **Add to Home Screen** 
 
    Keep `/data` on a persistent volume (it holds your swipes, history and caches).
 2. **Set `ACCESS_TOKEN`.** Without it the app only answers on localhost. With it, the whole API (your history, swipes and TMDB key) needs a login cookie. Your phone asks for the code once. `https://your-app/?t=<code>` also works as a one-tap private link. Wrong codes are rate limited. Optionally pin your domain with `ALLOWED_HOSTS=swipeflick.example.com`.
-3. **Add a free TMDB key** (`TMDB_API_KEY`, or in *Profile → Catalog*). That's what brings real Netflix posters, the full catalog and the trending list.
+3. **Add one free TMDB key, as the owner, once** (`TMDB_API_KEY` on the host). That's what brings real Netflix posters, the full catalog and the trending list. In hosted mode visitors never see a key field and can't change it. The server builds the catalog once, keeps it on the volume, and refreshes it itself every week (trending daily).
 4. **Sync your Netflix history from the phone**, no laptop and no CSV: *Sync from Netflix* shows a one-time bookmark to save. Then open *netflix.com/viewingactivity*, sign in, and tap the bookmark. It reads your list in your own signed-in browser and brings it back to SwipeFlick. Your password never leaves Netflix.
 
 > **iPhone note:** save the bookmark in **Safari** (Chrome on iOS doesn't run bookmarklets). Android: Chrome works; type the bookmark's name in the address bar and pick it.

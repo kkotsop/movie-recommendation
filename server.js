@@ -148,7 +148,7 @@ function publicState() {
   const { tmdbKey, ...settings } = state.settings;
   return {
     settings: { ...settings, hasTmdbKey: Boolean(tmdbKey) },
-    features: { browserLogin: !HOSTED }, // the Playwright login needs a desktop; hosted/phone mode uses the bookmarklet
+    features: { browserLogin: !HOSTED, tmdbKeyEditable: !HOSTED }, // hosted: the owner's key comes from TMDB_API_KEY; visitors never see or enter one
     onboarded: state.onboarded,
     catalog: { source: catalog.source, count: catalog.titles.filter((t) => t.onNetflix !== false).length, builtAt: catalog.builtAt },
     history: state.history && {
@@ -270,7 +270,7 @@ const routes = {
     if (['both', 'movie', 'series'].includes(body.types)) next.types = body.types;
     if (Number.isFinite(body.minRating)) next.minRating = Math.max(0, Math.min(9.5, body.minRating));
     if (typeof body.region === 'string' && /^[A-Z]{2}$/.test(body.region)) next.region = body.region;
-    if (typeof body.tmdbKey === 'string') next.tmdbKey = body.tmdbKey.trim();
+    if (typeof body.tmdbKey === 'string' && !HOSTED) next.tmdbKey = body.tmdbKey.trim();
     const catalogChanged = next.tmdbKey !== state.settings.tmdbKey || next.region !== state.settings.region;
     state.settings = next;
     saveState(state);
@@ -292,6 +292,7 @@ const routes = {
   },
 
   'POST /api/catalog/refresh': () => {
+    if (HOSTED) return [403, { error: 'The catalog is refreshed automatically every week.' }];
     rebuildCatalog({ force: true });
     return { ok: true };
   },
@@ -369,4 +370,9 @@ server.listen(PORT, HOST, () => {
   if (state.settings.tmdbKey && catalog.source === 'demo') rebuildCatalog();
   else refreshTrendingNow();
 });
-setInterval(() => refreshTrendingNow().catch(() => {}), 6 * 3600000).unref();
+const WEEK = 7 * 86400000;
+setInterval(() => {
+  refreshTrendingNow().catch(() => {});
+  // Nobody taps "Refresh" in hosted mode, so the server re-reads Netflix's catalog itself once a week.
+  if (state.settings.tmdbKey && catalog.source === 'tmdb' && catalog.builtAt && Date.now() - catalog.builtAt > WEEK) rebuildCatalog({ force: true });
+}, 6 * 3600000).unref();

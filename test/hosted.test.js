@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { startServer, rawGet } from './helpers.js';
 
 const CODE = 'correct-horse-battery';
@@ -80,5 +81,22 @@ test('ALLOWED_HOSTS pins the hosted domain', async () => {
   try {
     assert.equal(await rawGet(s.base, '/', 'swipeflick.example.com'), 200);
     assert.equal(await rawGet(s.base, '/', 'evil.example'), 403);
+  } finally { s.stop(); }
+});
+
+test('hosted visitors cannot see, set or replace the owner\'s TMDB key, or force catalog rebuilds', async () => {
+  const s = await startServer({ ACCESS_TOKEN: CODE, TMDB_API_KEY: 'owner-key-123' });
+  try {
+    const headers = { cookie: cookieFrom(await s.call('POST', '/api/login', { code: CODE })) };
+    const state = (await s.call('GET', '/api/state', undefined, headers)).json;
+    assert.equal(state.features.tmdbKeyEditable, false);
+    assert.equal(state.settings.hasTmdbKey, true, 'the owner key is in use');
+    assert.ok(!JSON.stringify(state).includes('owner-key-123'), 'and never sent to the browser');
+    await s.call('POST', '/api/settings', { tmdbKey: 'visitor-key' }, headers);
+    const after = await s.call('GET', '/api/state', undefined, headers);
+    assert.equal(after.json.settings.hasTmdbKey, true);
+    assert.equal((await s.call('POST', '/api/catalog/refresh', {}, headers)).status, 403);
+    const saved = JSON.stringify(JSON.parse(fs.readFileSync(`${s.dir}/state.json`, 'utf8')));
+    assert.ok(!saved.includes('visitor-key'));
   } finally { s.stop(); }
 });

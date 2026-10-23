@@ -78,7 +78,7 @@ test("I'm feeling lucky shows a single pick that can be saved", { skip }, async 
 });
 
 test("Today's picks tab lists five titles and swiping one removes it", { skip }, async () => {
-  await page.locator('[data-tab="daily"]').click();
+  await page.locator('#btn-daily').click();
   await page.locator('#daily-grid .like-card').first().waitFor();
   assert.equal(await page.locator('#daily-grid .like-card').count(), 5);
   const name = await page.locator('#daily-grid .lc-title').first().innerText();
@@ -109,8 +109,17 @@ test('settings sheet filters the deck to series', { skip }, async () => {
   assert.equal(deck, 'series');
 });
 
+test('About & credits carries the TMDB attribution', { skip }, async () => {
+  await page.locator('[data-tab="profile"]').click();
+  await page.locator('#open-about').click();
+  assert.match(await page.locator('#sheet-about').innerText(), /uses the TMDB API but is not endorsed or certified by TMDB/);
+  await page.locator('#sheet-about [data-close]').last().click();
+  await page.locator('[data-tab="discover"]').click();
+});
+
 test('reset swipes clears the counters', { skip }, async () => {
-  await page.locator('#btn-reset').click();
+  await page.locator('#btn-filters').click();
+  await page.locator('#sheet-filters [data-action="reset"]').click();
   await page.waitForTimeout(700);
   const s = await stats();
   assert.deepEqual([s.likes, s.supers, s.nopes], [0, 0, 0]);
@@ -157,7 +166,9 @@ test('phone flow: unlock, save the bookmark, run it on Netflix, land back with h
 
     await p.locator('#welcome').waitFor({ state: 'visible' });
     assert.match(await p.locator('#welcome-netflix').innerText(), /sync from netflix/i);
+    assert.match(await p.locator('#welcome-privacy').innerText(), /password is never asked for, seen or stored/i);
     await p.locator('#welcome-netflix').click();
+    assert.match(await p.locator('#sheet-sync .privacy-note').innerText(), /don't store your Netflix login/i);
     const bookmark = await p.locator('#sync-code').inputValue();
     assert.match(bookmark, /^javascript:/);
     assert.ok(!/[\r\n]/.test(bookmark), 'a bookmark has to survive being one line');
