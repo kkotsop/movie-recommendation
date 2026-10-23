@@ -39,6 +39,28 @@ It works straight away with a built-in catalog of 100 Netflix originals that hav
 
 You can also set it before starting: `TMDB_API_KEY=xxxx npm start`.
 
+## Use it on your phone (install as an app)
+
+SwipeFlick is a PWA: open it in your phone's browser and **Add to Home Screen** to get a full-screen app with its own icon. Phones only install PWAs, and only cache them offline, over **HTTPS**, so the server has to run somewhere that has a certificate.
+
+1. **Run it somewhere always on.** Any host that runs a container and gives you HTTPS works (Fly.io, Render, Railway, a home server behind Tailscale or a Cloudflare Tunnel). The included `Dockerfile` is all it needs:
+
+   ```bash
+   docker build -t swipeflick .
+   docker run -p 8080:8080 -v swipeflick-data:/data \
+     -e ACCESS_TOKEN=pick-a-long-random-code \
+     -e TMDB_API_KEY=your-free-tmdb-key \
+     swipeflick
+   ```
+
+   Keep `/data` on a persistent volume (it holds your swipes, history and caches).
+2. **Set `ACCESS_TOKEN`.** Without it the app only answers on localhost. With it, the whole API (your history, swipes and TMDB key) needs a login cookie. Your phone asks for the code once. `https://your-app/?t=<code>` also works as a one-tap private link. Wrong codes are rate limited. Optionally pin your domain with `ALLOWED_HOSTS=swipeflick.example.com`.
+3. **Add a free TMDB key** (`TMDB_API_KEY`, or in *Profile → Catalog*). That's what brings real Netflix posters, the full catalog and the trending list.
+4. **Sync your Netflix history from the phone**, no laptop and no CSV: *Sync from Netflix* shows a one-time bookmark to save. Then open *netflix.com/viewingactivity*, sign in, and tap the bookmark. It reads your list in your own signed-in browser and brings it back to SwipeFlick. Your password never leaves Netflix.
+
+> **iPhone note:** save the bookmark in **Safari** (Chrome on iOS doesn't run bookmarklets). Android: Chrome works; type the bookmark's name in the address bar and pick it.
+> The bookmark reads the same Viewing activity page as the desktop sync, so it needs the same upkeep if Netflix changes that page. It has only been tested against a stand-in page, not netflix.com itself.
+
 ## Getting your Netflix history in
 
 Netflix has no public API, so there are two ways:
@@ -84,8 +106,10 @@ SwipeFlick does the same, but for titles, in `src/recommender.js`:
 2. **Your taste is one vector too.** It starts from your Netflix history, where each show is weighted by **recency** (one-year half-life) × **engagement** (1 + log₂ of episodes watched). Then every swipe updates it: Like adds the title's features, Must watch adds them twice, Nope subtracts 0.7× and hides that title forever. The whole history counts about as much as 4 likes, so a few swipes quickly steer the deck.
 3. **Score = cosine similarity to your taste + IMDb quality** (rating scaled around 6.5 and weighted by vote count).
 4. **The deck is sampled** from the top 60 with a softmax over scores, not a fixed top 10, so it feels fresh. About 12% of cards are **exploration** picks (rated 7+ but outside your usual taste), labelled "Something different for you". Rewatches get their sampling weight × 0.3.
-5. **I'm feeling lucky** looks only at unseen titles rated **7.5+ on IMDb** (dropping to 7.0, then to anything, if none are left), ranks them by fit + quality, and picks one of the top 3, so pressing it again can give a new answer.
-6. **Rewind** pops the last swipe. Because the profile is rebuilt from history + swipes on every request, undo is exact.
+5. **What's trending now counts a little.** Once a day the app fetches TMDB's trending list and Netflix's most popular titles in your country and adds a small bonus (up to 0.15 of the score) to titles that are hot right now. Taste still wins: a trending title that doesn't fit you won't beat one that does. Cards show "Trending on Netflix now" when that's the best reason.
+6. **Today's picks** (the sun tab) is five highly rated titles (7+) from your best matches, chosen with a date-seeded draw, so the list is the same all day and different tomorrow.
+7. **I'm feeling lucky** looks only at unseen titles rated **7.5+ on IMDb** (dropping to 7.0, then to anything, if none are left), ranks them by fit + quality, and picks one of the top 3, so pressing it again can give a new answer.
+8. **Rewind** pops the last swipe. Because the profile is rebuilt from history + swipes on every request, undo is exact.
 
 ## Data sources
 
@@ -104,16 +128,22 @@ src/recommender.js     taste vectors, scoring, deck sampling, feeling lucky
 src/catalog.js         TMDB catalog build + history matching, demo catalog
 src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
 src/imdb.js            IMDb ratings dataset download + lookup
-src/netflix.js         "Log in with Netflix" browser flow (Playwright)
+src/netflix.js         "Log in with Netflix" browser flow (Playwright, desktop only)
 src/store.js           JSON state in ./data (swipes, settings, imported history)
 public/                the Tinder-style UI (vanilla HTML/CSS/JS, no build step)
-test/                  node --test unit tests
+public/sw.js           service worker (offline shell, cached posters)
+public/netflix-export.js  the phone "Sync from Netflix" bookmark
+scripts/make-icons.js  renders the PNG app icons from public/icon.svg
+Dockerfile             always-on container for the phone setup
+test/                  unit, API, hosted-mode and browser end-to-end tests
 ```
 
 Your data lives in `./data/` (git-ignored): `state.json`, caches, and the Netflix browser profile.
 
 ```bash
-npm test
+npm test      # unit + API + hosted-mode + a phone-sized browser end-to-end run
 ```
+
+The end-to-end tests drive Chrome, Edge or Playwright's Chromium and skip themselves if none is installed. CI (`.github/workflows/test.yml`) runs everything on Node 20 and 24.
 
 Not affiliated with Netflix, IMDb, TMDB or Tinder.

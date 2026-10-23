@@ -1,0 +1,8 @@
+node_modules
+data/state.json
+data/cache
+data/browser-profile
+.git
+.playwright-mcp
+test
+docs

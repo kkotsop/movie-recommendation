@@ -1,4 +1,5 @@
 // SwipeFlick client: Tinder's card stack, gestures and screens for movies & series.
+import { bookmarkletFor } from './netflix-export.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -11,6 +12,7 @@ const api = {
       body: body == null ? undefined : raw ? body : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && data.error === 'locked') { showLock(); throw Object.assign(new Error('Locked'), { status: 401 }); }
     if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
     return data;
   },
@@ -25,6 +27,7 @@ const S = {
   refilling: false,
   likesFilter: 'all',
   likes: [],
+  daily: [],
   polling: null,
   lastJobs: {},
   detailFor: null, // {card, from: 'deck'|'likes'}
@@ -473,7 +476,7 @@ function closePick() {
 function openDetail(t, from) {
   if (!t) return;
   S.detailFor = { card: t, from };
-  const actions = from === 'deck'
+  const actions = from === 'deck' || from === 'daily'
     ? `<button class="act act-lg act-nope" data-d="nope" aria-label="Nope">${icon('nope')}</button>
        <button class="act act-sm act-super" data-d="super" aria-label="Must watch">${icon('star')}</button>
        <button class="act act-lg act-like" data-d="like" aria-label="Like">${icon('heart')}</button>`
@@ -500,7 +503,7 @@ function openDetail(t, from) {
 $('#detail').addEventListener('click', async (e) => {
   const d = e.target.closest('[data-d]')?.dataset.d;
   if (!d || !S.detailFor) return;
-  const { card } = S.detailFor;
+  const { card, from } = S.detailFor;
   closeSheets();
   if (d === 'remove') {
     await api.post('/api/unswipe', { id: card.id });
@@ -508,6 +511,16 @@ $('#detail').addEventListener('click', async (e) => {
     toast(`Removed ${card.title}`);
     await refreshState();
     loadLikes();
+  } else if (from === 'daily') {
+    await api.post('/api/swipe', { id: card.id, action: d });
+    S.swipedThisSession.add(card.id);
+    S.queue = S.queue.filter((c) => c.id !== card.id);
+    cardEl(card.id)?.remove();
+    layoutDeck();
+    S.daily = S.daily.filter((c) => c.id !== card.id);
+    renderDaily();
+    toast(d === 'nope' ? `Won't show ${card.title} again` : `${d === 'super' ? '⭐' : '💚'} ${card.title} saved`);
+    refreshState();
   } else if (topCard()?.dataset.id === card.id) {
     setTimeout(() => swipeTop(d), 150);
   }
@@ -629,6 +642,34 @@ $('#likes-filter').addEventListener('click', (e) => {
   renderLikes();
 });
 
+// ---------------------------------------------------------------- today's picks
+
+async function loadDaily() {
+  try {
+    const { cards, date } = await api.get('/api/daily');
+    S.daily = cards;
+    $('#daily-date').textContent = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  } catch (err) {
+    toast(err.message);
+  }
+  renderDaily();
+}
+
+function renderDaily() {
+  $('#daily-grid').innerHTML = S.daily.length
+    ? S.daily.map((t) => `
+      <button class="like-card" data-id="${esc(t.id)}">
+        ${pageHtml(t, 'poster')}
+        <span class="lc-info"><div class="lc-title">${esc(t.title)}</div><div class="lc-sub">${t.year || ''} · ${t.type === 'series' ? 'Series' : 'Movie'}${t.imdbRating ? ` · ★ ${t.imdbRating}` : ''}</div><span class="lc-why">${esc(t.reason?.text || '')}</span></span>
+      </button>`).join('')
+    : '<div class="empty-note"><span class="big">🌤️</span>You\'re all caught up. Fresh picks arrive tomorrow.</div>';
+}
+
+$('#daily-grid').addEventListener('click', (e) => {
+  const id = e.target.closest('.like-card')?.dataset.id;
+  if (id) openDetail(S.daily.find((c) => c.id === id), 'daily');
+});
+
 function updateBadge() {
   const n = (S.state?.stats.likes || 0) + (S.state?.stats.supers || 0);
   const badge = $('#likes-badge');
@@ -724,6 +765,7 @@ $('#reset-all').addEventListener('click', resetAll);
 // ---------------------------------------------------------------- history import
 
 async function connectNetflix() {
+  if (S.state && !S.state.features?.browserLogin) return openSyncSheet();
   try {
     await api.post('/api/netflix/connect');
     startPolling();
@@ -766,6 +808,66 @@ window.addEventListener('drop', (e) => {
   dragDepth = 0;
   $('#drop-hint').hidden = true;
   uploadCsv(e.dataTransfer.files[0]);
+});
+
+// ---------------------------------------------------------------- phone sync (bookmark)
+
+function openSyncSheet() {
+  const code = bookmarkletFor(location.origin);
+  $('#sync-code').value = code;
+  $('#sync-copy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast('Bookmark copied. Paste it as the address of a new bookmark.');
+    } catch {
+      $('#sync-code').select();
+      toast('Select the text below and copy it');
+    }
+  };
+  openSheet('#sheet-sync');
+}
+
+/** The bookmark hands the viewing list back as #import=<base64 csv>. */
+async function importFromHash() {
+  const m = location.hash.match(/^#import=(.+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const csv = decodeURIComponent(escape(atob(m[1])));
+    const res = await api.post('/api/history/csv', csv, true);
+    toast(`Imported ${res.entries.toLocaleString()} views across ${res.titles} titles`);
+    hideWelcome();
+    await refreshState();
+    refill(true);
+    startPolling();
+  } catch (err) {
+    if (err.status !== 401) toast(err.message || 'Could not read that import');
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- lock (hosted mode)
+
+let afterUnlock = null;
+function showLock() {
+  $('#lock').hidden = false;
+  $('#lock-code').focus();
+}
+
+$('#lock-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('#lock-error');
+  err.hidden = true;
+  try {
+    await api.post('/api/login', { code: $('#lock-code').value });
+    $('#lock').hidden = true;
+    $('#lock-code').value = '';
+    if (afterUnlock) { const go = afterUnlock; afterUnlock = null; go(); }
+    else location.reload();
+  } catch (error) {
+    err.textContent = error.message;
+    err.hidden = false;
+  }
 });
 
 // ---------------------------------------------------------------- welcome
@@ -830,6 +932,7 @@ function startPolling() {
 function showTab(name) {
   $$('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === name));
   $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
+  if (name === 'daily') loadDaily();
   if (name === 'likes') loadLikes();
   if (name === 'profile') refreshState();
 }
@@ -899,14 +1002,23 @@ document.addEventListener('keydown', (e) => {
 
 // ---------------------------------------------------------------- boot
 
-(async function init() {
+async function init() {
   const st = await refreshState();
   S.lastJobs = structuredClone(st.jobs);
+  const phoneOnly = !st.features.browserLogin;
+  if (phoneOnly) {
+    $('#welcome-netflix').textContent = 'Sync from Netflix';
+    $('#profile-sync').lastChild.textContent = 'Sync Netflix';
+    const help = $('.welcome-help');
+    help.querySelector('summary').textContent = 'How does syncing work?';
+    help.innerHTML = help.querySelector('summary').outerHTML + '<p>You save a bookmark once. When you tap it on netflix.com, it reads your <b>Viewing activity</b> in your own signed-in browser and brings the list back here. SwipeFlick never sees your password.</p>';
+  }
   if (!st.onboarded) {
     showWelcome();
     const guess = (navigator.language || '').split('-')[1]?.toUpperCase();
     if (guess && REGIONS[guess] && guess !== st.settings.region && st.settings.region === 'US') await saveSettings({ region: guess }, false);
   }
+  await importFromHash();
   await refill(true);
   let seenCoach = false;
   try { seenCoach = Boolean(localStorage.getItem('swipeflick.coach')); } catch {}
@@ -915,4 +1027,25 @@ document.addEventListener('keydown', (e) => {
     setTimeout(hideCoach, 9000);
   }
   if (jobRunning(st.jobs.netflix) || jobRunning(st.jobs.catalog)) startPolling();
+}
+
+(async () => {
+  try {
+    const auth = await api.get('/api/auth');
+    if (auth.required && !auth.authed) { afterUnlock = init; showLock(); return; }
+  } catch {}
+  init();
 })();
+
+// ---------------------------------------------------------------- install as an app (PWA)
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// Home-screen shortcuts from manifest.webmanifest: /?tab=daily and /?lucky=1
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('tab') === 'daily') showTab('daily');
+  if (q.get('lucky')) setTimeout(() => feelingLucky(), 600);
+}

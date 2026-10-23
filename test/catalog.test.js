@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.SWIPEFLICK_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-'));
+process.env.IMDB_RETRY_MS = '1';
 const { buildTmdbCatalog, loadDemoCatalog, resolveByTitle } = await import('../src/catalog.js');
 const { mapDetails } = await import('../src/tmdb.js');
 
@@ -48,6 +49,7 @@ test('buildTmdbCatalog discovers Netflix titles and resolves watch history', asy
     assert.equal(dark.onNetflix, false, 'watched title not in the discover lists');
     assert.equal(groups[0].titleId, 'tmdb-tv-2');
     assert.match(roma.netflixUrl, /netflix\.com\/search\?q=Roma/);
+    assert.equal(calls.filter((c) => c.includes('title.ratings')).length, 3, 'IMDb download is retried before giving up');
   } finally {
     globalThis.fetch = realFetch;
   }

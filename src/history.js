@@ -76,8 +76,13 @@ export function parseViewingHistoryCsv(text) {
   let titleCol = header.indexOf('title');
   let dateCol = header.indexOf('date');
   let body = rows.slice(1);
-  if (titleCol === -1) { titleCol = 0; dateCol = 1; body = rows; }
-  return entriesFromRows(body.map((r) => ({ title: r[titleCol], date: dateCol >= 0 ? r[dateCol] : '' })));
+  const headerless = titleCol === -1;
+  if (headerless) { titleCol = 0; dateCol = 1; body = rows; }
+  const picked = body.map((r) => ({ title: r[titleCol], date: dateCol >= 0 ? r[dateCol] : '' }));
+  // A localized header ("Τίτλος,Ημερομηνία") is fine, but a random spreadsheet is not: most rows need a date like 28/09/2026.
+  const dateShaped = (d) => /^\s*\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}\s*$/.test(d || '');
+  if (headerless && picked.filter((r) => dateShaped(r.date)).length < picked.length / 2) return [];
+  return entriesFromRows(picked);
 }
 
 /** [{title, date: raw locale string}] -> [{title, date: YYYY-MM-DD|null}] */

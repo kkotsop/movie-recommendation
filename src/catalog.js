@@ -136,6 +136,63 @@ export async function buildTmdbCatalog({ key, region, groups = [], force = false
   return { titles, groups: resolvedGroups };
 }
 
+const TRENDING_MAX_AGE = 24 * 3600000;
+
+/**
+ * "Hot right now" signal per title id, 0..1. Combines TMDB's daily trending
+ * list with Netflix-only popularity for the region, so something that is both
+ * trending worldwide and popular on Netflix ranks highest.
+ */
+export async function fetchTrending(tmdb, region) {
+  const scores = {};
+  const bump = (kind, id, value) => {
+    const key = `tmdb-${kind}-${id}`;
+    scores[key] = Math.max(scores[key] || 0, value);
+  };
+  for (const kind of ['movie', 'tv']) {
+    const pages = [1, 2];
+    const trending = await mapLimit(pages, 2, (page) => tmdb.get(`/trending/${kind}/day`, { page }));
+    const list = trending.flatMap((r) => r?.results || []);
+    list.forEach((r, i) => bump(kind, r.id, 1 - i / Math.max(1, list.length)));
+    const popular = await mapLimit(pages, 2, (page) => tmdb.get(`/discover/${kind}`, {
+      page, sort_by: 'popularity.desc', watch_region: region, with_watch_providers: NETFLIX_PROVIDER_ID,
+      with_watch_monetization_types: 'flatrate', language: 'en-US',
+    }));
+    const hot = popular.flatMap((r) => r?.results || []);
+    hot.forEach((r, i) => bump(kind, r.id, 0.8 * (1 - i / Math.max(1, hot.length))));
+  }
+  return scores;
+}
+
+/** Writes `trend` (0..1) onto titles; titles that aren't trending get 0. Mutates and returns titles. */
+export function applyTrending(titles, scores) {
+  for (const t of titles) t.trend = scores?.[t.id] || 0;
+  return titles;
+}
+
+/** Cached trending scores for a region, or null when missing/older than a day. */
+export function cachedTrending(region, now = Date.now()) {
+  const c = readCache(`trending-${region}.json`);
+  return c && now - c.at < TRENDING_MAX_AGE ? c.scores : null;
+}
+
+/** Refreshes the daily trending cache if it is stale. Returns the scores, or null if it could not be fetched. */
+export async function refreshTrending({ key, region, force = false, fetchImpl }) {
+  if (!force) {
+    const fresh = cachedTrending(region);
+    if (fresh) return fresh;
+  }
+  try {
+    const scores = await fetchTrending(createTmdb(key, fetchImpl), region);
+    writeCache(`trending-${region}.json`, { at: Date.now(), region, scores });
+    return scores;
+  } catch (err) {
+    console.warn(`Trending unavailable (${err.message})`);
+    const stale = readCache(`trending-${region}.json`);
+    return stale?.scores || null;
+  }
+}
+
 /** Cached TMDB catalog for a region (plus looked-up history titles), or null. */
 export function cachedTmdbCatalog(region) {
   const c = readCache(`catalog-${region}.json`);

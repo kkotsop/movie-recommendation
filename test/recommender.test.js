@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildProfile, nextDeck, feelingLucky, scoreTitle, candidates } from '../src/recommender.js';
+import { buildProfile, nextDeck, feelingLucky, scoreTitle, candidates, dailyPicks, explain, seededRng } from '../src/recommender.js';
 
 const T = (id, genres, keywords, extra = {}) => ({ id, title: id, type: 'movie', year: 2020, genres, keywords, imdbRating: 7.5, imdbVotes: 100000, ...extra });
 
@@ -78,4 +78,42 @@ test('feeling lucky falls back when nothing is rated 7.5+', () => {
   const low = [T('a', ['Drama'], [], { imdbRating: 6.1 })];
   const pick = feelingLucky({ catalog: low, profile: buildProfile({ byId: new Map() }), swipedIds: new Set(), watchedIds: new Set(), settings: {}, rng: () => 0 });
   assert.equal(pick.id, 'a');
+});
+
+test('a trending title outranks an otherwise identical one, but taste still wins', () => {
+  const profile = buildProfile({ byId, swipes: [{ id: 'space1', action: 'like' }] });
+  const hot = { ...byId.get('space2'), trend: 1 };
+  const cold = { ...byId.get('space2'), id: 'cold', trend: 0 };
+  assert.ok(scoreTitle(profile, hot) > scoreTitle(profile, cold));
+  const offTaste = { ...byId.get('romcom1'), trend: 1 };
+  assert.ok(scoreTitle(profile, byId.get('space3')) > scoreTitle(profile, offTaste));
+});
+
+test('trending titles with no closer match are explained as trending', () => {
+  const t = { ...T('x', ['Drama'], []), trend: 0.9 };
+  const reason = explain(buildProfile({ byId: new Map() }), t);
+  assert.equal(reason.kind, 'trending');
+});
+
+test('daily picks are stable for a date, differ across dates, and respect filters', () => {
+  const many = Array.from({ length: 40 }, (_, i) => T(`m${i}`, ['Drama'], ['k'], { imdbRating: 7 + (i % 3) / 2 }));
+  const profile = buildProfile({ byId: new Map(many.map((t) => [t.id, t])) });
+  const args = { catalog: many, profile, swipedIds: new Set(['m0']), watchedIds: new Set(['m1']), settings: {} };
+  const ids = (date) => dailyPicks({ ...args, date }).map((c) => c.id);
+  const a = ids('2026-10-23');
+  assert.equal(a.length, 5);
+  assert.deepEqual(a, ids('2026-10-23'));
+  assert.notDeepEqual(a, ids('2026-10-24'));
+  assert.equal(new Set(a).size, a.length);
+  assert.ok(!a.includes('m0') && !a.includes('m1'));
+});
+
+test('seededRng is deterministic and in [0, 1)', () => {
+  const r1 = seededRng('seed');
+  const r2 = seededRng('seed');
+  for (let i = 0; i < 100; i++) {
+    const v = r1();
+    assert.equal(v, r2());
+    assert.ok(v >= 0 && v < 1);
+  }
 });

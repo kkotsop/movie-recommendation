@@ -31,6 +31,9 @@ export const TUNING = {
   poolSize: 60,
   exploreRate: 0.12,
   luckyMinRating: 7.5,
+  trendingWeight: 0.15, // what's hot on Netflix right now nudges the score; taste still dominates
+  dailyPickCount: 5,
+  dailyPoolSize: 25,
 };
 
 const featureCache = new WeakMap();
@@ -119,10 +122,13 @@ function quality(t) {
   return Math.max(-1, Math.min(1, (r - 6.5) / 2.5));
 }
 
+/** 0..1 "hot right now" signal set by catalog.applyTrending (1 = top of Netflix's trending list). */
+export const trendOf = (t) => Math.max(0, Math.min(1, t.trend || 0));
+
 export function scoreTitle(profile, t) {
   const sim = profile.empty ? 0 : dot(profile.vector, featuresOf(t));
   const votes = t.imdbVotes ? Math.min(1, Math.log10(t.imdbVotes) / 6) : 0.5;
-  return sim + TUNING.qualityWeight * quality(t) * votes;
+  return sim + TUNING.qualityWeight * quality(t) * votes + TUNING.trendingWeight * trendOf(t);
 }
 
 /** Which liked/watched title a recommendation is most like (for the card's "Because you…" line). */
@@ -139,6 +145,7 @@ export function explain(profile, t) {
     const verb = best.source === 'watched' ? 'watched' : best.source === 'superliked' ? 'loved' : 'liked';
     return { kind: 'similar', text: `Because you ${verb} ${best.title}`, anchorId: best.id };
   }
+  if (trendOf(t) >= 0.6) return { kind: 'trending', text: 'Trending on Netflix now' };
   if ((ratingOf(t) || 0) >= 8) return { kind: 'rated', text: `Rated ${ratingOf(t)} on ${t.imdbRating != null ? 'IMDb' : 'TMDB'}` };
   return { kind: 'popular', text: 'Popular on Netflix' };
 }
@@ -213,6 +220,43 @@ export function feelingLucky({ catalog, profile, swipedIds, excludeIds, watchedI
     }
   }
   return null;
+}
+
+/** Small deterministic PRNG so a given seed (e.g. today's date) always gives the same sequence. */
+export function seededRng(seed) {
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * "Today's picks": a short, highly rated list that fits your taste and what's hot.
+ * The list is the same all day (seeded by the date) and changes tomorrow.
+ * `date` is a YYYY-MM-DD string.
+ */
+export function dailyPicks({ catalog, profile, swipedIds, excludeIds, watchedIds, settings, date, n = TUNING.dailyPickCount }) {
+  const rng = seededRng(date);
+  const pool = candidates({ catalog, swipedIds, excludeIds, watchedIds, settings: { ...settings, includeWatched: false, minRating: Math.max(settings?.minRating || 0, 7) } })
+    .map((t) => ({ t, score: scoreTitle(profile, t) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, TUNING.dailyPoolSize);
+  const picks = [];
+  while (picks.length < n && pool.length) {
+    const max = pool[0].score;
+    const weights = pool.map((p) => Math.exp((p.score - max) / TUNING.temperature));
+    const [picked] = pool.splice(weightedPick(pool, weights, rng), 1);
+    picks.push(decorate(profile, picked.t, { watchedIds, score: picked.score }));
+  }
+  return picks;
 }
 
 function decorate(profile, t, { watchedIds, exploring = false, score }) {

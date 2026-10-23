@@ -21,7 +21,7 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; overflow: hidden; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
@@ -32,7 +32,7 @@ a { color: var(--brand-a); }
 .app { height: 100dvh; display: flex; flex-direction: column; max-width: 480px; margin: 0 auto; position: relative; }
 
 /* ---------- top bar ---------- */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px; flex: none; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 14px 6px; flex: none; }
 .logo, .welcome-logo { display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 26px; letter-spacing: -1px; }
 .logo span { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .logo-mark { width: 30px; height: 30px; color: var(--brand-a); }
@@ -43,7 +43,7 @@ a { color: var(--brand-a); }
 /* ---------- views ---------- */
 .views { flex: 1; min-height: 0; position: relative; }
 .view { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.view-likes, .view-profile { overflow-y: auto; padding: 4px 16px 24px; }
+.view-likes, .view-daily, .view-profile { overflow-y: auto; padding: 4px 16px 24px; }
 .view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
 h1 { font-size: 24px; margin: 0; letter-spacing: -.5px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; }
@@ -185,6 +185,7 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: va
 .like-card .lc-info { position: absolute; left: 0; right: 0; bottom: 0; padding: 30px 10px 10px; background: linear-gradient(transparent, rgba(0, 0, 0, .9)); z-index: 2; }
 .like-card .lc-title { font-weight: 800; font-size: 15px; line-height: 1.15; }
 .like-card .lc-sub { font-size: 12px; color: #cfd4df; margin-top: 2px; }
+.like-card .lc-why { display: block; margin-top: 4px; font-size: 11px; font-weight: 700; color: #7ff0e2; }
 .like-card .lc-star { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; background: var(--super); display: grid; place-items: center; z-index: 2; }
 .like-card .lc-star svg { width: 16px; height: 16px; color: #fff; }
 .empty-note { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 60px 20px; }
@@ -282,7 +283,7 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .drop-hint { position: fixed; inset: 12px; border: 3px dashed var(--brand-a); border-radius: 18px; display: grid; place-items: center; background: rgba(14, 16, 20, .85); z-index: 90; font-size: 20px; font-weight: 800; }
 
 /* ---------- welcome ---------- */
-.welcome { position: fixed; inset: 0; z-index: 40; background: linear-gradient(200deg, var(--brand-a), var(--brand-b) 60%, #2b1f7a); display: flex; overflow-y: auto; }
+.welcome { position: fixed; inset: 0; padding-top: env(safe-area-inset-top); z-index: 40; background: linear-gradient(200deg, var(--brand-a), var(--brand-b) 60%, #2b1f7a); display: flex; overflow-y: auto; }
 .welcome-inner { margin: auto; width: 100%; max-width: 420px; padding: 40px 28px; text-align: center; }
 .welcome-logo { justify-content: center; font-size: 46px; color: #fff; }
 .welcome-logo .logo-mark { width: 54px; height: 54px; color: #fff; }
@@ -316,7 +317,17 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 }
 
 /* generated posters in the small likes grid */
+.daily-sub { margin: -6px 0 14px; font-size: 14px; }
 .like-card .poster-gen { justify-content: flex-start; padding: 26% 12px 0; }
 .like-card .pg-emoji { font-size: 40px; margin-bottom: 6px; }
 .like-card .pg-title { font-size: 20px; letter-spacing: -.5px; }
 .like-card .pg-type { display: none; }
+
+/* hosted lock screen + phone sync sheet */
+.lock-input { height: 50px; border-radius: 99px; border: 0; padding: 0 22px; font-size: 17px; text-align: center; background: rgba(255, 255, 255, .92); color: #0e1014; width: 100%; box-sizing: border-box; }
+.lock-error { margin: 4px 0 0; font-weight: 700; }
+.sync-steps { padding-left: 20px; line-height: 1.5; margin: 6px 0 14px; }
+.sync-steps li { margin-bottom: 10px; }
+.sync-code { width: 100%; box-sizing: border-box; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 11px/1.3 ui-monospace, monospace; padding: 8px; resize: none; }
+.sync-note { font-size: 13px; }
+#lock { z-index: 60; }

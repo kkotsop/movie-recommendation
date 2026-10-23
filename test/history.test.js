@@ -53,3 +53,10 @@ test('normalizeTitle ignores accents, punctuation and &', () => {
   assert.equal(normalizeTitle('Love, Death & Robots'), 'love death and robots');
   assert.equal(normalizeTitle('Pokémon: The Movie'), 'pokemon the movie');
 });
+
+test('headerless files need real dates, so random CSVs are rejected but localized headers still work', () => {
+  assert.deepEqual(parseViewingHistoryCsv('not,a,netflix file\n1,2,3'), []);
+  const greek = parseViewingHistoryCsv('Τίτλος,Ημερομηνία\n"Dark: Σεζόν 1: Μυστικά","28/09/2026"\n"The Irishman","30/08/2026"\n');
+  assert.equal(greek.length, 3,'header row is kept as a harmless dateless entry');
+  assert.equal(greek.filter((e) => e.date).length, 2);
+});

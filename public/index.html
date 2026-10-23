@@ -6,10 +6,29 @@
   <meta name="theme-color" content="#0e1014">
   <title>SwipeFlick</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SwipeFlick">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <div class="app" id="app">
+
+    <!-- Hosted mode: unlock with your access code -->
+    <section class="welcome" id="lock" hidden>
+      <div class="welcome-inner">
+        <div class="welcome-logo"><svg class="logo-mark" viewBox="0 0 24 24"><use href="#i-spark"/></svg><span>swipeflick</span></div>
+        <p class="welcome-tagline">Enter your access code</p>
+        <form class="welcome-actions" id="lock-form">
+          <input class="lock-input" id="lock-code" type="password" autocomplete="current-password" placeholder="Access code" aria-label="Access code" required>
+          <button class="pill pill-white" type="submit">Unlock</button>
+          <p class="lock-error" id="lock-error" role="alert" hidden></p>
+        </form>
+      </div>
+    </section>
 
     <!-- Welcome / login (Tinder's gradient sign-in screen) -->
     <section class="welcome" id="welcome" hidden>
@@ -66,6 +85,16 @@
           <span><kbd>↑</kbd> Open info</span><span><kbd>↓</kbd> Close info</span><span><kbd>Space</kbd> Next page</span>
           <span><kbd>⌫</kbd> Rewind</span><span><kbd>L</kbd> Feeling lucky</span>
         </div>
+      </section>
+
+      <!-- Today's picks -->
+      <section class="view view-daily" id="view-daily" hidden>
+        <div class="view-head">
+          <h1>Today's picks</h1>
+          <span class="muted" id="daily-date"></span>
+        </div>
+        <p class="muted daily-sub">Highly rated, matched to your taste and what's hot on Netflix. A new set every day.</p>
+        <div class="likes-grid" id="daily-grid"></div>
       </section>
 
       <!-- Likes -->
@@ -130,6 +159,7 @@
 
     <nav class="tabbar" id="tabbar">
       <button class="tab on" data-tab="discover" aria-label="Discover"><svg viewBox="0 0 24 24"><use href="#i-spark"/></svg></button>
+      <button class="tab" data-tab="daily" aria-label="Today's picks"><svg viewBox="0 0 24 24"><use href="#i-today"/></svg></button>
       <button class="tab" data-tab="likes" aria-label="Likes"><svg viewBox="0 0 24 24"><use href="#i-likes"/></svg><span class="badge" id="likes-badge" hidden></span></button>
       <button class="tab" data-tab="profile" aria-label="Profile"><svg viewBox="0 0 24 24"><use href="#i-user"/></svg></button>
     </nav>
@@ -166,6 +196,25 @@
       </div>
     </div>
 
+    <!-- Sync from Netflix on a phone: the bookmark -->
+    <div class="sheet" id="sheet-sync" role="dialog" aria-modal="true" aria-labelledby="sync-title" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <div class="sheet-body">
+        <div class="sheet-head"><span></span><h2 id="sync-title">Sync from Netflix</h2><button class="link link-brand" data-close>Done</button></div>
+        <ol class="sync-steps">
+          <li><b>Save the bookmark.</b> Tap <i>Copy bookmark</i>, then add any page as a bookmark and paste this into its address. On iPhone: Safari → Share → Add Bookmark, then edit it and paste. On Android: Chrome → ⋮ → ☆, then edit it and paste.</li>
+          <li><b>Open Netflix.</b> Tap <i>Open viewing activity</i>, sign in and pick your profile.</li>
+          <li><b>Tap the bookmark.</b> In the address bar, type its name and choose it (iPhone: open bookmarks and tap it). It reads your history and brings you back here.</li>
+        </ol>
+        <div class="row-btns">
+          <button class="pill pill-brand pill-sm" id="sync-copy">Copy bookmark</button>
+          <a class="pill pill-outline pill-sm" id="sync-open" href="https://www.netflix.com/viewingactivity" target="_blank" rel="noopener">Open viewing activity</a>
+        </div>
+        <textarea class="sync-code" id="sync-code" readonly rows="3" aria-label="Bookmark address"></textarea>
+        <p class="muted sync-note">Your Netflix password stays on netflix.com. The bookmark only reads the viewing list and hands it to this app.</p>
+      </div>
+    </div>
+
     <!-- Expanded card / title details -->
     <div class="sheet sheet-full" id="sheet-detail" role="dialog" aria-modal="true" hidden>
       <div class="sheet-backdrop" data-close></div>
@@ -195,6 +244,7 @@
     <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></g></symbol>
     <symbol id="i-reset" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20.5V16h-4.5"/></g></symbol>
     <symbol id="i-likes" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2.2"/><path fill="currentColor" d="M12 17s-4.2-2.6-5.3-5.1C6 10 7.1 8 9.2 8c1.2 0 2 .7 2.8 1.6.8-.9 1.6-1.6 2.8-1.6 2.1 0 3.2 2 2.5 3.9C16.2 14.4 12 17 12 17z"/></symbol>
+    <symbol id="i-today" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></g></symbol>
     <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path fill="currentColor" d="M3.5 21c.6-4.3 4-7 8.5-7s7.9 2.7 8.5 7z"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4.5v15l12-7.5z"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3"/></g></symbol>

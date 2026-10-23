@@ -17,10 +17,22 @@ async function ensureDataset() {
     if (Date.now() - fs.statSync(FILE).mtimeMs < MAX_AGE) return;
   } catch {}
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const res = await fetch(URL);
-  if (!res.ok) throw new Error(`IMDb dataset download failed (${res.status})`);
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(`${FILE}.tmp`));
-  fs.renameSync(`${FILE}.tmp`, FILE);
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, (Number(process.env.IMDB_RETRY_MS) || 1500) * 2 ** attempt));
+    try {
+      const res = await fetch(URL);
+      if (!res.ok) throw new Error(`IMDb dataset download failed (${res.status})`);
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(`${FILE}.tmp`));
+      fs.renameSync(`${FILE}.tmp`, FILE);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  // An older copy is still far better than no ratings at all.
+  if (fs.existsSync(FILE)) return;
+  throw lastError;
 }
 
 /** Map imdbId -> {rating, votes} for the requested ids only. */
