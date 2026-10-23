@@ -117,3 +117,31 @@ test('seededRng is deterministic and in [0, 1)', () => {
     assert.ok(v >= 0 && v < 1);
   }
 });
+
+test('"later" is a mild yes: it hides the title, warms taste a little, and never counts as a like', () => {
+  const other = T('other', ['Western'], ['desert']);
+  const all = new Map([...catalog, other].map((t) => [t.id, t]));
+  const score = (swipes, id) => scoreTitle(buildProfile({ byId: all, swipes }), all.get(id));
+  const like = { id: 'romcom1', action: 'like' };
+  assert.ok(score([{ id: 'space1', action: 'later' }, like], 'space2') > score([like], 'space2'), 'later nudges toward similar titles');
+  assert.ok(score([{ id: 'space1', action: 'later' }, like], 'space2') < score([{ id: 'space1', action: 'like' }, like], 'space2'), 'but less than a like');
+  assert.ok(score([{ id: 'space1', action: 'nope' }, like], 'space2') < score([like], 'space2'), 'and a nope pushes the other way');
+  assert.equal(buildProfile({ byId: all, swipes: [{ id: 'space1', action: 'later' }] }).anchors.length, 0, '"because you liked" never points at something only saved for later');
+  assert.ok(!candidates({ catalog, swipedIds: new Set(['space1']), watchedIds: new Set(), settings: {} }).some((t) => t.id === 'space1'), 'and it is hidden from the deck');
+});
+
+test('stand-up and concerts form their own taste: loving specials surfaces more specials', () => {
+  const special = (id, title, extra = {}) => T(id, ['Comedy'], ['stand-up comedy'], { format: 'standup', title, ...extra });
+  const movieComedy = T('rom', ['Comedy'], ['wedding'], { imdbRating: 7.5 });
+  const cat = [special('s1', 'Special one'), special('s2', 'Special two'), movieComedy, T('thrill', ['Thriller'], ['heist'])];
+  const map = new Map(cat.map((t) => [t.id, t]));
+  const profile = buildProfile({ byId: map, swipes: [{ id: 's1', action: 'super' }] });
+  assert.ok(scoreTitle(profile, map.get('s2')) > scoreTitle(profile, map.get('rom')), 'the other special beats a rom-com that is also "Comedy"');
+});
+
+test('titles not on Netflix only appear when the person asks for titles from anywhere', () => {
+  const other = [T('on', ['Drama'], [], { onNetflix: true }), T('off', ['Drama'], [], { onNetflix: false })];
+  const ids = (settings) => candidates({ catalog: other, swipedIds: new Set(), watchedIds: new Set(), settings }).map((t) => t.id);
+  assert.deepEqual(ids({}), ['on']);
+  assert.deepEqual(ids({ anywhere: true }).sort(), ['off', 'on']);
+});

@@ -38,6 +38,17 @@ export async function mapLimit(items, limit, fn) {
   return out;
 }
 
+const STANDUP = new Set(['stand-up comedy', 'stand up comedy', 'standup comedy', 'stand-up', 'stand up', 'standup', 'stand-up comedian', 'comedy special']);
+const CONCERT = new Set(['concert', 'concert film', 'live concert', 'concert movie', 'live music', 'music festival', 'live performance']);
+
+/** "standup" or "concert" when the keywords (or genres) say so. These are a different kind of watch from a drama or a sitcom. */
+export function formatOf(keywords = [], genres = []) {
+  const k = keywords.map((x) => String(x).toLowerCase());
+  if (k.some((x) => STANDUP.has(x))) return 'standup';
+  if (k.some((x) => CONCERT.has(x))) return 'concert';
+  return null;
+}
+
 export function mapDetails(kind, d) {
   const isMovie = kind === 'movie';
   const date = isMovie ? d.release_date : d.first_air_date;
@@ -62,6 +73,7 @@ export function mapDetails(kind, d) {
     cast: (credits?.cast || []).slice(0, 6).map((c) => c.name),
     creators: creators.slice(0, 3),
     language: d.original_language || null,
+    format: formatOf(keywords.map((k) => k.name), (d.genres || []).map((g) => g.name)),
     overview: d.overview || '',
     tagline: d.tagline || '',
     poster: d.poster_path ? `${IMG}w780${d.poster_path}` : null,

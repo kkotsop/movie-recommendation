@@ -1,7 +1,6 @@
 // Builds the swipeable catalog: what's on Netflix in a region (via TMDB) plus IMDb ratings.
 // Everything here is storage-free so it runs in a Cloudflare Worker, a Workflow, or a Node test.
 import { fetchDetails, mapLimit, NETFLIX_PROVIDER_ID } from './tmdb.js';
-import { normalizeTitle } from '../public/lib/history.js';
 
 export { netflixUrl, resolveByTitle } from '../public/lib/match.js';
 import { netflixUrl } from '../public/lib/match.js';
@@ -9,33 +8,70 @@ import { netflixUrl } from '../public/lib/match.js';
 /** A real catalog needs at least this many Netflix titles; fewer means TMDB has nothing for that country. */
 export const MIN_NETFLIX_TITLES = 20;
 
-function bestMatch(results, name) {
-  const want = normalizeTitle(name);
-  const exact = results.find((r) => [r.title, r.name, r.original_title, r.original_name].some((n) => n && normalizeTitle(n) === want));
-  return exact || results[0] || null;
+const KEYWORD_QUERIES = {
+  standup: ['stand-up comedy', 'stand up comedy', 'standup comedy', 'stand-up comedian'],
+  concert: ['concert', 'concert film', 'live concert', 'live music', 'music festival'],
+};
+const MUSIC_GENRE = 10402;
+
+/**
+ * TMDB keyword ids for stand-up comedy and concerts ("9716|1997|..."). The general lists are dominated by
+ * blockbusters, so without asking for these by name they would almost never appear in anyone's deck.
+ */
+export async function formatKeywordIds(tmdb) {
+  const out = {};
+  for (const [format, names] of Object.entries(KEYWORD_QUERIES)) {
+    const ids = new Set();
+    for (const name of names) {
+      const res = await tmdb.get('/search/keyword', { query: name }).catch(() => ({ results: [] }));
+      for (const k of res.results || []) if (k.name?.toLowerCase() === name) ids.add(k.id);
+    }
+    out[format] = [...ids].join('|');
+  }
+  return out;
 }
 
-/** [{kind, id}] of everything TMDB lists as streaming on Netflix in `region`. */
-export async function discoverRefs(tmdb, region, onProgress) {
+/** The lists to read: what is popular and well rated, plus stand-up specials and concerts asked for by name. */
+function discoverLists(sizes, formats) {
   const lists = [];
   for (const kind of ['movie', 'tv']) {
-    for (let page = 1; page <= 12; page++) lists.push({ kind, page, sort_by: 'popularity.desc' });
-    for (let page = 1; page <= 8; page++) lists.push({ kind, page, sort_by: 'vote_average.desc', 'vote_count.gte': kind === 'movie' ? 500 : 200 });
+    for (let page = 1; page <= sizes.popular[kind]; page++) lists.push({ kind, page, sort_by: 'popularity.desc' });
+    for (let page = 1; page <= sizes.top[kind]; page++) lists.push({ kind, page, sort_by: 'vote_average.desc', 'vote_count.gte': kind === 'movie' ? 500 : 200 });
   }
+  for (const [format, keywords] of Object.entries(formats)) {
+    if (!keywords) continue;
+    for (let page = 1; page <= sizes.format; page++) lists.push({ kind: 'movie', page, sort_by: 'popularity.desc', with_keywords: keywords });
+    for (let page = 1; page <= 3; page++) lists.push({ kind: 'movie', page, sort_by: 'vote_average.desc', 'vote_count.gte': 30, with_keywords: keywords });
+    if (format === 'standup') for (let page = 1; page <= 2; page++) lists.push({ kind: 'tv', page, sort_by: 'popularity.desc', with_keywords: keywords });
+  }
+  for (let page = 1; page <= Math.ceil(sizes.format / 2); page++) lists.push({ kind: 'movie', page, sort_by: 'popularity.desc', with_genres: MUSIC_GENRE });
+  return lists;
+}
+
+async function runLists(tmdb, lists, extra, onProgress, label) {
   const seen = new Map();
   let done = 0;
   await mapLimit(lists, 6, async ({ kind, ...params }) => {
-    const res = await tmdb.get(`/discover/${kind}`, {
-      ...params,
-      watch_region: region,
-      with_watch_providers: NETFLIX_PROVIDER_ID,
-      with_watch_monetization_types: 'flatrate',
-      language: 'en-US',
-    });
+    const res = await tmdb.get(`/discover/${kind}`, { ...params, ...extra, language: 'en-US' });
     for (const r of res.results || []) seen.set(`${kind}:${r.id}`, { kind, id: r.id });
-    onProgress?.(`Finding what's on Netflix ${region}…`, (++done / lists.length) * 0.3);
+    onProgress?.(label, (++done / lists.length) * 0.3);
   });
   return [...seen.values()];
+}
+
+/** [{kind, id}] of everything TMDB lists as streaming on Netflix in `region`, including stand-up and concerts. */
+export async function discoverRefs(tmdb, region, onProgress, formats) {
+  formats ||= await formatKeywordIds(tmdb);
+  const lists = discoverLists({ popular: { movie: 12, tv: 12 }, top: { movie: 8, tv: 8 }, format: 6 }, formats);
+  return runLists(tmdb, lists, { watch_region: region, with_watch_providers: NETFLIX_PROVIDER_ID, with_watch_monetization_types: 'flatrate' },
+    onProgress, `Finding what's on Netflix ${region}…`);
+}
+
+/** [{kind, id}] of popular and well-rated titles anywhere, for people who also watch on other services or IPTV. */
+export async function discoverAnywhere(tmdb, onProgress, formats) {
+  formats ||= await formatKeywordIds(tmdb);
+  const lists = discoverLists({ popular: { movie: 15, tv: 10 }, top: { movie: 10, tv: 6 }, format: 6 }, formats);
+  return runLists(tmdb, lists, {}, onProgress, 'Finding popular titles…');
 }
 
 /** Full details (cast, keywords, ...) for a batch of {kind, id} refs. Failed lookups are skipped. */
@@ -52,50 +88,6 @@ export function applyRatings(titles, ratings) {
     if (r) { t.imdbRating = r.rating; t.imdbVotes = r.votes; }
   }
   return titles;
-}
-
-/**
- * Matches watch-history groups to TMDB titles. `shared` is the cache every person uses
- * ({getSearch(keys), putSearch(obj), getTitles(ids), putTitles(titles)}), so the first person to
- * watch something pays for the lookup and everyone after gets it free. Titles that are not in
- * `knownIds` (watched, but not on Netflix now) are fetched so they can still shape taste.
- * Returns the TMDB title id (or null) for each group, in order.
- */
-export async function resolveHistory({ tmdb, groups, knownIds = new Set(), shared }) {
-  const keyOf = (g) => `${g.kind === 'series' ? 'tv' : 'movie'}|${normalizeTitle(g.name)}`;
-  const cache = await shared.getSearch([...new Set(groups.map(keyOf))]);
-  const fresh = {};
-  const ids = await mapLimit(groups, 6, async (g) => {
-    const key = keyOf(g);
-    if (!(key in cache) && !(key in fresh)) {
-      const kind = g.kind === 'series' ? 'tv' : 'movie';
-      let res = await tmdb.get(`/search/${kind}`, { query: g.name });
-      let hit = bestMatch(res.results || [], g.name);
-      let hitKind = kind;
-      if (!hit) {
-        res = await tmdb.get('/search/multi', { query: g.name });
-        hit = bestMatch((res.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv'), g.name);
-        hitKind = hit?.media_type;
-      }
-      fresh[key] = hit ? { kind: hitKind, id: hit.id } : null;
-    }
-    const hit = key in cache ? cache[key] : fresh[key];
-    return hit ? `tmdb-${hit.kind}-${hit.id}` : null;
-  });
-  if (Object.keys(fresh).length) await shared.putSearch(fresh);
-
-  const missing = [...new Set(ids.filter((id) => id && !knownIds.has(id)))];
-  if (missing.length) {
-    const have = new Set((await shared.getTitles(missing)).map((t) => t.id));
-    const todo = missing.filter((id) => !have.has(id));
-    const extra = (await mapLimit(todo, 8, (id) => {
-      const [, kind, tmdbId] = id.split('-');
-      return fetchDetails(tmdb, kind, tmdbId);
-    })).filter(Boolean);
-    for (const t of extra) { t.onNetflix = false; t.netflixUrl = netflixUrl(t.title); }
-    if (extra.length) await shared.putTitles(extra);
-  }
-  return ids;
 }
 
 /**

@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
-import { discoverRefs, fetchTitles, applyRatings, resolveHistory, resolveByTitle, MIN_NETFLIX_TITLES } from '../src/catalog.js';
+import { discoverRefs, discoverAnywhere, formatKeywordIds, fetchTitles, applyRatings, resolveByTitle, MIN_NETFLIX_TITLES } from '../src/catalog.js';
 import fs from 'node:fs';
 import { demoCatalog } from '../public/lib/engine.js';
 import { imdbRatings } from '../src/imdb.js';
-import { createTmdb, mapDetails } from '../src/tmdb.js';
+import { createTmdb, mapDetails, formatOf } from '../src/tmdb.js';
 
 const loadDemoCatalog = () => demoCatalog(JSON.parse(fs.readFileSync(new URL('../public/demo-catalog.json', import.meta.url), 'utf8'))).titles;
 
@@ -24,19 +24,6 @@ function fakeTmdb(routes, calls = []) {
     return answer ? json(typeof answer === 'function' ? answer(u) : answer) : json({}, 404);
   };
   return createTmdb('key', fetchImpl, 'https://tmdb.test/3');
-}
-
-/** The shared lookup table every person uses, in memory. */
-function memoryShared() {
-  const search = {};
-  const titles = new Map();
-  return {
-    search, titles,
-    getSearch: async (keys) => Object.fromEntries(keys.filter((k) => k in search).map((k) => [k, search[k]])),
-    putSearch: async (entries) => Object.assign(search, entries),
-    getTitles: async (ids) => ids.filter((id) => titles.has(id)).map((id) => titles.get(id)),
-    putTitles: async (list) => list.forEach((t) => titles.set(t.id, t)),
-  };
 }
 
 test('mapDetails normalises TMDB movies and series', () => {
@@ -60,7 +47,7 @@ test('discoverRefs lists what is on Netflix in the country, deduplicated', async
   }, calls);
   const refs = await discoverRefs(tmdb, 'GR');
   assert.deepEqual(refs.map((r) => `${r.kind}:${r.id}`).sort(), ['movie:1', 'movie:3', 'tv:1', 'tv:2']);
-  assert.ok(calls.every((c) => c.includes('watch_region=GR') && c.includes('with_watch_providers=8')));
+  assert.ok(calls.filter((c) => c.startsWith('/discover')).every((c) => c.includes('watch_region=GR') && c.includes('with_watch_providers=8')));
 });
 
 test('fetchTitles returns full details marked as on Netflix, skipping failures', async () => {
@@ -98,35 +85,40 @@ test('demo catalog loads and history matches alternative titles', () => {
   assert.equal(titles.find((t) => t.id === g.titleId)?.title, 'Money Heist');
 });
 
-test('resolveHistory matches titles on TMDB once, shares the answer, and only fetches what is unknown', async () => {
-  const calls = [];
-  const tmdb = fakeTmdb({
-    '/search/tv': { results: [{ id: 2, name: 'Dark' }] },
-    '/search/movie': { results: [{ id: 1, title: 'Roma' }] },
-    '/tv/2': show, '/movie/1': movie,
-  }, calls);
-  const shared = memoryShared();
-  const groups = [{ name: 'Dark', kind: 'series' }, { name: 'Roma', kind: 'movie' }];
-
-  const first = await resolveHistory({ tmdb, groups, knownIds: new Set(['tmdb-movie-1']), shared });
-  assert.deepEqual(first, ['tmdb-tv-2', 'tmdb-movie-1']);
-  assert.deepEqual([...shared.titles.keys()], ['tmdb-tv-2'], 'Roma is already in the catalog, so only Dark is fetched');
-  assert.equal(shared.titles.get('tmdb-tv-2').onNetflix, false);
-
-  calls.length = 0;
-  const again = await resolveHistory({ tmdb, groups, knownIds: new Set(['tmdb-movie-1']), shared });
-  assert.deepEqual(again, first);
-  assert.deepEqual(calls, [], 'the second person pays nothing: no search and no detail lookup');
+test('stand-up and concerts are recognised from their keywords and kept as their own format', () => {
+  assert.equal(formatOf(['stand-up comedy', 'netflix']), 'standup');
+  assert.equal(formatOf(['Stand Up Comedy']), 'standup', 'case does not matter');
+  assert.equal(formatOf(['concert film']), 'concert');
+  assert.equal(formatOf(['heist', 'london']), null);
+  const special = { ...movie, id: 7, title: 'Dave: Live', keywords: { keywords: [{ name: 'stand-up comedy' }, { name: 'live' }] } };
+  assert.equal(mapDetails('movie', special).format, 'standup');
+  assert.equal(mapDetails('movie', movie).format, null);
 });
 
-test('resolveHistory remembers titles TMDB has no match for, so nobody searches for them again', async () => {
+test('stand-up and concerts are asked for by name, because the popular lists would never include them', async () => {
   const calls = [];
-  const tmdb = fakeTmdb({ '/search/movie': { results: [] }, '/search/multi': { results: [] } }, calls);
-  const shared = memoryShared();
-  const groups = [{ name: 'A Film Nobody Has Heard Of', kind: 'movie' }];
-  assert.deepEqual(await resolveHistory({ tmdb, groups, shared }), [null]);
-  const searches = calls.length;
-  assert.ok(searches > 0);
-  assert.deepEqual(await resolveHistory({ tmdb, groups, shared }), [null]);
-  assert.equal(calls.length, searches);
+  const tmdb = fakeTmdb({
+    '/search/keyword': (u) => ({ results: { 'stand-up comedy': [{ id: 9716, name: 'stand-up comedy' }], concert: [{ id: 1997, name: 'concert' }] }[u.searchParams.get('query')] || [] }),
+    '/discover/movie': (u) => ({ results: u.searchParams.get('page') !== '1' ? [] : u.searchParams.get('with_keywords')?.includes('9716') ? [{ id: 301 }] : [{ id: 1 }] }),
+    '/discover/tv': { results: [] },
+  }, calls);
+  const formats = await formatKeywordIds(tmdb);
+  assert.equal(formats.standup, '9716');
+  assert.ok(formats.concert.includes('1997'));
+  const refs = await discoverRefs(tmdb, 'GR', undefined, formats);
+  assert.deepEqual(refs.map((r) => r.id).sort((a, b) => a - b), [1, 301], 'the stand-up special is found even though it is in no popular list');
+  assert.ok(calls.some((c) => c.includes('with_keywords=9716')));
+  assert.ok(calls.filter((c) => c.startsWith('/discover')).every((c) => c.includes('watch_region=GR')), 'country lists stay on Netflix in that country');
+});
+
+test('titles from anywhere are listed without a country or provider filter', async () => {
+  const calls = [];
+  const tmdb = fakeTmdb({
+    '/search/keyword': { results: [] },
+    '/discover/movie': (u) => ({ results: u.searchParams.get('page') === '1' ? [{ id: 401 }] : [] }),
+    '/discover/tv': { results: [] },
+  }, calls);
+  const refs = await discoverAnywhere(tmdb);
+  assert.deepEqual(refs.map((r) => r.id), [401]);
+  assert.ok(calls.filter((c) => c.startsWith('/discover')).every((c) => !c.includes('watch_region') && !c.includes('with_watch_providers')));
 });

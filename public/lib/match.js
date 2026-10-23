@@ -17,16 +17,3 @@ export function resolveByTitle(groups, titles) {
     return { ...g, titleId: t && (g.kind !== 'series' || t.type === 'series') ? t.id : null };
   });
 }
-
-/**
- * The few fields the recommender needs about a title the phone keeps for itself
- * (watched, but not in the catalog). Small enough to store hundreds of them.
- */
-export function compactTitle(t) {
-  return {
-    id: t.id, type: t.type, title: t.title, aka: t.aka || [], year: t.year ?? null,
-    genres: t.genres || [], keywords: (t.keywords || []).slice(0, 15), creators: (t.creators || []).slice(0, 3),
-    cast: (t.cast || []).slice(0, 5), language: t.language ?? null, imdbRating: t.imdbRating ?? null,
-    tmdbRating: t.tmdbRating ?? null, onNetflix: false,
-  };
-}

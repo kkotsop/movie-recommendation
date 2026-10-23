@@ -6,7 +6,9 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { createTmdb } from '../src/tmdb.js';
 import { buildCatalogs, readPrevious, writeCatalogs } from '../scripts/build-catalogs.js';
-import { fakeTmdbServer, buildFixtureCatalogs, rating, MOVIES, SERIES } from './fixtures.js';
+import { fakeTmdbServer, buildFixtureCatalogs, rating, MOVIES, SERIES, STANDUP, CONCERT, WORLD } from './fixtures.js';
+
+const DISTINCT = MOVIES.length + SERIES.length + STANDUP.length + CONCERT.length + WORLD.length; // each title is fetched once, whatever the country
 
 let fake;
 before(async () => { fake = await fakeTmdbServer(); });
@@ -19,12 +21,12 @@ const tmdb = () => createTmdb('k', undefined, fake.base);
 test('builds one gzipped catalog per country with IMDb ratings, trending and an index', async () => {
   const now = Date.parse('2026-10-23T03:00:00Z');
   const { dir, catalogs } = await buildFixtureCatalogs(fake, ['US', 'GR'], { now });
-  assert.deepEqual([...catalogs.keys()].sort(), ['GR', 'US']);
+  assert.deepEqual([...catalogs.keys()].sort(), ['ALL', 'GR', 'US']);
 
   const us = readCatalog(dir, 'US');
   assert.equal(us.region, 'US');
   assert.equal(us.builtAt, now);
-  assert.equal(us.titles.length, MOVIES.length + SERIES.length);
+  assert.equal(us.titles.length, MOVIES.length + SERIES.length + STANDUP.length + CONCERT.length, 'popular titles plus stand-up and concerts');
   assert.ok(us.titles.every((t) => t.onNetflix === true && /netflix\.com\/search/.test(t.netflixUrl) && t.fetchedAt === now));
   const by = Object.fromEntries(us.titles.map((t) => [t.id, t]));
   assert.equal(by['tmdb-movie-105'].imdbRating, rating(105), 'IMDb ratings come from the dataset');
@@ -34,21 +36,48 @@ test('builds one gzipped catalog per country with IMDb ratings, trending and an 
   assert.match(by['tmdb-movie-105'].poster, /\/p105\.jpg$/);
 
   const index = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'));
-  assert.deepEqual(Object.keys(index.regions).sort(), ['GR', 'US']);
-  assert.equal(index.regions.US.count, 40);
+  assert.deepEqual(Object.keys(index.regions).sort(), ['ALL', 'GR', 'US']);
+  assert.equal(index.regions.US.count, 50);
+});
+
+test('stand-up specials and concerts make it into the catalog even though no popular list contains them', async () => {
+  const { dir } = await buildFixtureCatalogs(fake, ['US']);
+  const by = Object.fromEntries(readCatalog(dir, 'US').titles.map((t) => [t.id, t]));
+  for (const id of STANDUP) assert.equal(by[`tmdb-movie-${id}`]?.format, 'standup', `stand-up ${id}`);
+  for (const id of CONCERT) assert.equal(by[`tmdb-movie-${id}`]?.format, 'concert', `concert ${id}`);
+  assert.equal(by['tmdb-movie-101'].format, null, 'an ordinary film is neither');
+  assert.ok(fake.requests.some((r) => r.startsWith('/3/search/keyword')), 'the keyword ids are looked up, not hard-coded');
+  assert.ok(fake.requests.some((r) => r.includes('with_keywords=9716')));
+});
+
+test('a worldwide catalog holds popular titles from any service, marked as not on Netflix, with no trending boost', async () => {
+  const { dir } = await buildFixtureCatalogs(fake, ['US']);
+  const all = readCatalog(dir, 'ALL');
+  assert.equal(all.region, 'ALL');
+  assert.ok(all.titles.length >= 30);
+  assert.ok(all.titles.every((t) => t.onNetflix === false && t.trend === 0));
+  assert.ok(WORLD.every((id) => all.titles.some((t) => t.id === `tmdb-movie-${id}`)), 'titles that are not on Netflix anywhere');
+  assert.ok(STANDUP.every((id) => all.titles.some((t) => t.id === `tmdb-movie-${id}`)), 'stand-up too');
+  const us = readCatalog(dir, 'US');
+  assert.ok(!us.titles.some((t) => WORLD.includes(Number(t.id.split('-')[2]))), "and the country's own catalog stays Netflix-only");
+});
+
+test('the worldwide catalog can be left out', async () => {
+  const { catalogs } = await buildFixtureCatalogs(fake, ['US'], { anywhere: false });
+  assert.deepEqual([...catalogs.keys()], ['US']);
 });
 
 test('a title shared by several countries is fetched from TMDB only once', async () => {
   fake.requests.length = 0;
   await buildFixtureCatalogs(fake, ['US', 'GR', 'DE']);
   assert.equal(fake.requests.filter((r) => r === '/3/movie/101?append_to_response=keywords%2Ccredits%2Cexternal_ids' || r.startsWith('/3/movie/101')).length, 1);
-  assert.equal(detailCalls(), MOVIES.length + SERIES.length, 'one detail lookup per distinct title, not per country');
+  assert.equal(detailCalls(), DISTINCT, 'one detail lookup per distinct title, not per country');
 });
 
 test('a country TMDB has no Netflix catalog for is skipped, and the rest still build', async () => {
   const logs = [];
   const catalogs = await buildCatalogs({ tmdb: tmdb(), regions: ['ZZ', 'US'], ratings: async () => new Map(), log: (m) => logs.push(m) });
-  assert.deepEqual([...catalogs.keys()], ['US']);
+  assert.deepEqual([...catalogs.keys()], ['US', 'ALL']);
   assert.ok(logs.some((l) => /ZZ: only 0 titles, skipping/.test(l)));
 });
 
@@ -65,7 +94,7 @@ test('a later run reuses recent titles and only refetches stale ones', async () 
 
   fake.requests.length = 0;
   await buildFixtureCatalogs(fake, ['US'], { dir, previous: readPrevious(dir), now: t0 + 20 * day });
-  assert.equal(detailCalls(), MOVIES.length + SERIES.length, 'after two weeks everything is refreshed');
+  assert.equal(detailCalls(), DISTINCT, 'after two weeks everything is refreshed');
 });
 
 test('if IMDb is unreachable the build still succeeds and keeps earlier ratings', async () => {
@@ -93,5 +122,5 @@ test('countries that were not rebuilt keep their file and their index entry', as
 test('the catalog file is small enough for a phone', async () => {
   const { dir } = await buildFixtureCatalogs(fake, ['US']);
   const bytes = fs.statSync(path.join(dir, 'catalog', 'US.json.gz')).size;
-  assert.ok(bytes < 60_000, `${bytes} bytes for 40 titles`);
+  assert.ok(bytes < 60_000, `${bytes} bytes for 50 titles`);
 });

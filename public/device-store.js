@@ -5,9 +5,9 @@ const KEY = 'swipeflix.v1';
 const blank = () => ({
   v: 1,
   onboarded: false,
-  settings: { includeWatched: false, types: 'both', minRating: 0, region: null },
-  swipes: [], // [{id, action: 'like'|'super'|'nope', at}]
-  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched, titleId}], titles: {id: compact title}}
+  settings: { includeWatched: false, types: 'both', minRating: 0, anywhere: false, region: null },
+  swipes: [], // [{id, action: 'like'|'super'|'later'|'nope', at}]
+  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched}]}
 });
 
 let mem = null;
@@ -85,5 +85,5 @@ export function popSwipe() {
 export function counts() {
   const s = data().swipes;
   const n = (a) => s.filter((x) => x.action === a).length;
-  return { likes: n('like'), supers: n('super'), nopes: n('nope') };
+  return { likes: n('like'), supers: n('super'), later: n('later'), nopes: n('nope') };
 }

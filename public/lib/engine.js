@@ -14,20 +14,26 @@ export function demoCatalog(raw) {
   return makeCatalog('demo', raw.titles.map((t) => ({ ...t, netflixUrl: netflixUrl(t.title) })));
 }
 
-/** Two lookups in one: the country's catalog first, then titles the person watched that are not in it. */
-const layered = (a, b) => ({ get: (id) => a.get(id) ?? b.get(id), has: (id) => a.has(id) || b.has(id) });
+/**
+ * A country's catalog plus the worldwide one (titles from other services or IPTV). Titles on Netflix keep their
+ * Netflix entry; the rest are marked as not on Netflix and only shown when the person asks for titles from anywhere.
+ */
+export function mergeCatalogs(region, all) {
+  if (!all) return region;
+  const have = new Set(region.titles.map((t) => t.imdbId).filter(Boolean));
+  const extra = all.titles.filter((t) => !region.byId.has(t.id) && !(t.imdbId && have.has(t.imdbId)));
+  return { ...makeCatalog(region.source, [...region.titles, ...extra], region.builtAt), hasWorldwide: true };
+}
 
 /**
  * Everything the engine needs, from the catalog and the person's data:
- * data = {settings: {includeWatched, types, minRating}, swipes: [{id, action, at}],
- *         history: {groups: [{name, kind, views, lastWatched, titleId?}], titles: {id: compactTitle}} | null}
+ * data = {settings: {includeWatched, types, minRating, anywhere}, swipes: [{id, action, at}],
+ *         history: {groups: [{name, kind, views, lastWatched}]} | null}
  */
 export function makeContext(catalog, data) {
   const groups = data.history?.groups || [];
-  const extras = new Map(Object.entries(data.history?.titles || {}));
-  const byId = layered(catalog.byId, extras);
-  const byName = resolveByTitle(groups, catalog.titles); // fallback when a group has no stored match yet
-  const resolved = groups.map((g, i) => ({ ...g, titleId: g.titleId && byId.has(g.titleId) ? g.titleId : byName[i].titleId }));
+  const byId = catalog.byId;
+  const resolved = resolveByTitle(groups, catalog.titles);
   const watched = resolved.filter((g) => g.titleId);
   // A swipe on the built-in sample ("imdb-tt123") still counts once the country's real catalog replaces it.
   const byImdb = new Map(catalog.titles.filter((t) => t.imdbId).map((t) => [t.imdbId, t.id]));
@@ -64,7 +70,7 @@ export function daily(catalog, data, date) {
   return dailyPicks({ ...ctx, excludeIds: new Set(), date });
 }
 
-/** Titles liked or marked must-watch, newest first. */
+/** Titles liked, marked must-watch or saved for later, newest first. */
 export function likes(catalog, data) {
   const { ctx, swipes } = makeContext(catalog, data);
   return swipes.filter((s) => s.action !== 'nope' && catalog.byId.has(s.id)).reverse()
@@ -74,12 +80,6 @@ export function likes(catalog, data) {
 export function cards(catalog, data, ids) {
   const { ctx } = makeContext(catalog, data);
   return ids.filter((id) => catalog.byId.has(id)).map((id) => cardFor(ctx, catalog.byId.get(id)));
-}
-
-/** History groups the phone could not match on its own: these are worth a lookup. */
-export function unmatchedGroups(catalog, data) {
-  const { resolved } = makeContext(catalog, data);
-  return (data.history?.groups || []).filter((_, i) => !resolved[i].titleId);
 }
 
 /** Summary for the Profile tab and the badges. */
@@ -94,7 +94,7 @@ export function profile(catalog, data) {
       matched: resolved.filter((g) => g.titleId).length,
       recent: resolved.slice(0, 12).map((g) => ({ name: g.name, kind: g.kind, views: g.views, lastWatched: g.lastWatched, matched: Boolean(g.titleId) })),
     } : null,
-    stats: { likes: count('like'), supers: count('super'), nopes: count('nope'), remaining: ctx.catalog.length - ctx.swipedIds.size },
+    stats: { likes: count('like'), supers: count('super'), later: count('later'), nopes: count('nope'), remaining: ctx.catalog.length - ctx.swipedIds.size },
     taste: topTastes(ctx.profile),
   };
 }

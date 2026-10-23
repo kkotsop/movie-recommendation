@@ -17,6 +17,7 @@ export const WEIGHTS = {
   language: 0.35,
   type: 0.3,
   decade: 0.2,
+  format: 0.9, // stand-up specials and concerts are a taste of their own, not just "comedy" or "music"
 };
 
 export const TUNING = {
@@ -24,6 +25,7 @@ export const TUNING = {
   historyHalfLifeDays: 365,
   like: 1,
   superLike: 2,
+  later: 0.25, // "think about it later" is a mild yes
   nope: -0.7,
   qualityWeight: 0.3,
   rewatchFactor: 0.3, // watched titles are drawn ~3x less often than new ones
@@ -47,6 +49,7 @@ export function featuresOf(t) {
   for (const k of (t.keywords || []).slice(0, 15)) add(`k:${k.toLowerCase()}`, WEIGHTS.keyword);
   for (const c of (t.creators || []).slice(0, 3)) add(`c:${c}`, WEIGHTS.creator);
   for (const c of (t.cast || []).slice(0, 5)) add(`p:${c}`, WEIGHTS.cast);
+  if (t.format) add(`f:${t.format}`, WEIGHTS.format);
   if (t.language) add(`l:${t.language}`, WEIGHTS.language);
   if (t.type) add(`t:${t.type}`, WEIGHTS.type);
   if (t.year) add(`d:${Math.floor(t.year / 10) * 10}s`, WEIGHTS.decade);
@@ -105,9 +108,9 @@ export function buildProfile({ byId, watched = [], swipes = [], now = Date.now()
   for (const s of swipes) {
     const t = byId.get(s.id);
     if (!t) continue;
-    const scale = s.action === 'super' ? TUNING.superLike : s.action === 'like' ? TUNING.like : TUNING.nope;
+    const scale = s.action === 'super' ? TUNING.superLike : s.action === 'like' ? TUNING.like : s.action === 'later' ? TUNING.later : TUNING.nope;
     addScaled(vector, featuresOf(t), scale);
-    if (s.action !== 'nope') anchors.push({ id: t.id, title: t.title, weight: scale * 2, source: s.action === 'super' ? 'superliked' : 'liked' });
+    if (s.action === 'like' || s.action === 'super') anchors.push({ id: t.id, title: t.title, weight: scale * 2, source: s.action === 'super' ? 'superliked' : 'liked' });
   }
 
   return { vector: normalize(vector), anchors, byId, empty: vector.size === 0 };
@@ -152,10 +155,10 @@ export function explain(profile, t) {
 
 /** Titles that may appear in the deck given the user's settings. */
 export function candidates({ catalog, swipedIds, excludeIds = new Set(), watchedIds, settings }) {
-  const { includeWatched = false, types = 'both', minRating = 0 } = settings || {};
+  const { includeWatched = false, types = 'both', minRating = 0, anywhere = false } = settings || {};
   return catalog.filter((t) => {
     if (swipedIds.has(t.id) || excludeIds.has(t.id)) return false;
-    if (t.onNetflix === false) return false; // watched once, no longer streaming
+    if (t.onNetflix === false && !anywhere) return false; // not on Netflix here: only when the person asked for titles from anywhere
     if (types !== 'both' && t.type !== types) return false;
     if (minRating && (ratingOf(t) ?? 0) < minRating) return false;
     if (!includeWatched && watchedIds.has(t.id)) return false;

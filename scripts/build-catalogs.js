@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { createTmdb } from '../src/tmdb.js';
-import { discoverRefs, fetchTitles, applyRatings, fetchTrending, applyTrending, MIN_NETFLIX_TITLES } from '../src/catalog.js';
+import { createTmdb, formatOf } from '../src/tmdb.js';
+import { discoverRefs, discoverAnywhere, formatKeywordIds, fetchTitles, applyRatings, fetchTrending, applyTrending, MIN_NETFLIX_TITLES } from '../src/catalog.js';
 import { imdbRatings } from '../src/imdb.js';
 import { REGIONS } from '../public/lib/regions.js';
 
@@ -32,11 +32,13 @@ export function readPrevious(dir) {
 /**
  * @returns {Promise<Map<string, {region, builtAt, titles}>>} one entry per country that has a usable catalog
  */
-export async function buildCatalogs({ tmdb, regions, previous = new Map(), now = Date.now(), maxAgeDays = 14, ratings = imdbRatings, log = () => {} }) {
+export async function buildCatalogs({ tmdb, regions, anywhere = true, previous = new Map(), now = Date.now(), maxAgeDays = 14, ratings = imdbRatings, log = () => {} }) {
+  const formats = await formatKeywordIds(tmdb);
+  log(`stand-up keywords: ${formats.standup || 'none found'}; concert keywords: ${formats.concert || 'none found'}`);
   const refsByRegion = new Map();
   for (const region of regions) {
     try {
-      const refs = await discoverRefs(tmdb, region);
+      const refs = await discoverRefs(tmdb, region, undefined, formats);
       if (refs.length < MIN_NETFLIX_TITLES) log(`${region}: only ${refs.length} titles, skipping`);
       else refsByRegion.set(region, refs);
     } catch (err) {
@@ -44,14 +46,24 @@ export async function buildCatalogs({ tmdb, regions, previous = new Map(), now =
     }
   }
 
+  // Popular titles from anywhere, for people who also watch on other services or IPTV.
+  let anywhereRefs = [];
+  if (anywhere) {
+    try { anywhereRefs = await discoverAnywhere(tmdb, undefined, formats); } catch (err) { log(`ALL: ${err.message}, skipping`); }
+    log(`ALL: ${anywhereRefs.length} titles from anywhere`);
+  }
+
   // Titles are shared between countries, so each one is fetched once.
   const wanted = new Map();
-  for (const refs of refsByRegion.values()) for (const r of refs) wanted.set(idOf(r), r);
+  for (const refs of [...refsByRegion.values(), anywhereRefs]) for (const r of refs) wanted.set(idOf(r), r);
   const titles = new Map();
   const todo = [];
   for (const [id, ref] of wanted) {
     const old = previous.get(id);
-    if (old?.fetchedAt && now - old.fetchedAt < maxAgeDays * DAY) titles.set(id, old);
+    if (old?.fetchedAt && now - old.fetchedAt < maxAgeDays * DAY) {
+      if (old.format === undefined) old.format = formatOf(old.keywords); // titles fetched before formats existed
+      titles.set(id, old);
+    }
     else todo.push(ref);
   }
   log(`${wanted.size} titles across ${refsByRegion.size} countries (${titles.size} reused, ${todo.length} to fetch)`);
@@ -75,6 +87,10 @@ export async function buildCatalogs({ tmdb, regions, previous = new Map(), now =
     const list = applyTrending(refs.map((r) => titles.get(idOf(r))).filter(Boolean).map((t) => ({ ...t, onNetflix: true })), scores);
     if (list.length >= MIN_NETFLIX_TITLES) catalogs.set(region, { region, builtAt: now, titles: list });
   }
+  if (anywhereRefs.length >= MIN_NETFLIX_TITLES) {
+    const list = anywhereRefs.map((r) => titles.get(idOf(r))).filter(Boolean).map((t) => ({ ...t, onNetflix: false, trend: 0 }));
+    catalogs.set('ALL', { region: 'ALL', builtAt: now, titles: list });
+  }
   return catalogs;
 }
 
@@ -89,7 +105,7 @@ export function writeCatalogs(dir, catalogs, now = Date.now()) {
   try { earlier = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')).regions || {}; } catch { /* first run */ }
   const index = { builtAt: now, regions: {} };
   for (const file of fs.readdirSync(folder).filter((f) => f.endsWith('.json.gz'))) {
-    const region = file.slice(0, 2);
+    const region = file.replace('.json.gz', '');
     const c = catalogs.get(region);
     index.regions[region] = c ? { count: c.titles.length, builtAt: c.builtAt } : (earlier[region] || {});
   }

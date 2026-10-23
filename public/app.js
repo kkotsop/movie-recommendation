@@ -1,5 +1,4 @@
-// Swipeflix client: Tinder's card stack, gestures and screens for movies & series.
-import { bookmarkletFor } from './netflix-export.js';
+// Swipeflix client: a card stack for deciding what to watch. Everything personal stays on this phone.
 import * as device from './device-store.js';
 import * as engine from './lib/engine.js';
 import { REGIONS } from './lib/regions.js';
@@ -9,71 +8,73 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 
 const api = {
-  async req(method, path, body, raw = false) {
+  async req(method, path, body) {
     const res = await fetch(path, {
       method,
-      headers: body == null ? {} : { 'content-type': raw ? 'text/csv' : 'application/json' },
-      body: body == null ? undefined : raw ? body : JSON.stringify(body),
+      headers: body == null ? {} : { 'content-type': 'application/json' },
+      body: body == null ? undefined : JSON.stringify(body),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
-    return data;
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(out.error || `Request failed (${res.status})`), { status: res.status });
+    return out;
   },
-  get: (p) => api.req('GET', p),
   post: (p, b = {}) => api.req('POST', p, b),
 };
 
 const S = {
   state: null,
+  catalog: null, // the country's catalog (or the built-in sample), held in memory and scored on this phone
   queue: [], // cards in the stack, queue[0] is on top
   swipedThisSession: new Set(),
   refilling: false,
   likesFilter: 'all',
   likes: [],
   daily: [],
-  catalog: null, // the country's catalog (or the built-in sample), held in memory and scored on this phone
-  importJob: null, // {state, message}: recognising your watched titles after an import
-  detailFor: null, // {card, from: 'deck'|'likes'}
+  detailFor: null, // {card, from: 'daily'|'likes'}
   swipeCount: 0,
 };
+
+const data = () => device.data();
 
 // ---------------------------------------------------------------- the catalog (scored on this phone)
 
 let demoRaw;
-/** The country's catalog if it has been built, otherwise the built-in sample. Cached by the service worker. */
-async function loadCatalog() {
-  const region = device.data().settings.region;
+async function fetchCatalogFile(code) {
   try {
-    const res = await fetch(`/api/catalog/${region}`);
-    if (res.ok) {
-      const file = await res.json();
-      S.catalog = engine.makeCatalog('tmdb', file.titles, file.builtAt);
-      return S.catalog;
-    }
-  } catch { /* offline, or not built yet: use the sample */ }
-  try {
-    demoRaw ||= await (await fetch('/demo-catalog.json')).json();
-    S.catalog = engine.demoCatalog(demoRaw);
-  } catch {
-    S.catalog = engine.makeCatalog('demo', []);
-    toast("Couldn't load titles. Check your connection.");
-  }
-  return S.catalog;
+    const res = await fetch(`/api/catalog/${code}`);
+    if (res.ok) return await res.json();
+  } catch { /* offline, or not built yet */ }
+  return null;
 }
 
-const data = () => device.data();
+/**
+ * The country's catalog if it has been built, otherwise the built-in sample. The worldwide list (titles from other
+ * services, stand-up, concerts) is added when the person wants those, and to recognise more of what they've watched.
+ */
+async function loadCatalog() {
+  const d = data();
+  const needAll = d.settings.anywhere || Boolean(d.history?.groups?.length);
+  const [file, all] = await Promise.all([fetchCatalogFile(d.settings.region), needAll ? fetchCatalogFile('ALL') : null]);
+  let base;
+  if (file) base = engine.makeCatalog('tmdb', file.titles, file.builtAt);
+  else {
+    try {
+      demoRaw ||= await (await fetch('/demo-catalog.json')).json();
+      base = engine.demoCatalog(demoRaw);
+    } catch {
+      base = engine.makeCatalog('demo', []);
+      toast("Couldn't load titles. Check your connection.");
+    }
+  }
+  S.catalog = all ? engine.mergeCatalogs(base, { titles: all.titles }) : base;
+  return S.catalog;
+}
 
 // ---------------------------------------------------------------- formatting
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const icon = (id, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}"><use href="#i-${id}"/></svg>`;
-
-const GENRE_EMOJI = {
-  action: '💥', adventure: '🧭', 'action & adventure': '💥', animation: '✏️', biography: '📜', comedy: '😂', crime: '🕵️',
-  documentary: '🎥', drama: '🎭', family: '🏡', fantasy: '🐉', 'sci-fi & fantasy': '🚀', history: '🏛️', horror: '👻',
-  music: '🎵', musical: '🎵', mystery: '🔎', romance: '💘', 'sci-fi': '🚀', 'science fiction': '🚀', sport: '🏀',
-  thriller: '🔪', war: '⚔️', 'war & politics': '⚔️', western: '🤠', kids: '🧸', reality: '📺',
-};
+const FORMAT_LABEL = { standup: 'Stand-up', concert: 'Concert' };
 
 function hue(s) {
   let h = 0;
@@ -81,10 +82,7 @@ function hue(s) {
   return h;
 }
 
-function mainGenre(t) {
-  const g = (t.genres || []).map((x) => x.toLowerCase());
-  return g.find((x) => x !== 'drama' && GENRE_EMOJI[x]) || g[0] || '';
-}
+const kindLabel = (t) => FORMAT_LABEL[t.format] || (t.type === 'series' ? 'Series' : 'Movie');
 
 function ratingHtml(t) {
   if (t.imdbRating != null) return `<span class="rating"><b>IMDb</b>${t.imdbRating.toFixed(1)}</span>`;
@@ -104,24 +102,21 @@ function lengthText(t) {
 
 function metaHtml(t) {
   const len = lengthText(t);
-  return `<div class="card-meta">${ratingHtml(t)}<span>${t.type === 'series' ? 'Series' : 'Movie'}</span>${len ? `<span>·</span><span>${esc(len)}</span>` : ''}</div>`;
+  return `<div class="card-meta">${ratingHtml(t)}<span>${kindLabel(t)}</span>${len ? `<span>·</span><span>${esc(len)}</span>` : ''}</div>`;
 }
 
-/** A page background: the real poster/backdrop, or a generated poster. */
-function pageHtml(t, kind, extraCls = '') {
-  const img = kind === 'backdrop' ? t.backdrop || t.poster : t.poster;
-  if (img) return `<div class="card-page ${extraCls}" style="background-image:url('${esc(img)}')"></div>`;
-  const g = mainGenre(t);
-  return `<div class="card-page poster-gen ${extraCls}" style="--h:${hue(t.title)}">
-    <div class="pg-emoji">${GENRE_EMOJI[g] || '🎬'}</div>
-    <div class="pg-title">${esc(t.title)}</div>
-    <div class="pg-type">${t.type === 'series' ? 'A Netflix series' : 'A Netflix film'}</div>
-  </div>`;
+/** A page background: the real poster, or a plain typographic poster when there is none. */
+function pageHtml(t, extraCls = '') {
+  if (t.poster) return `<div class="card-page ${extraCls}" style="background-image:url('${esc(t.poster)}')"></div>`;
+  return `<div class="card-page poster-gen ${extraCls}" style="--h:${hue(t.title)}"></div>`;
 }
 
-function chipsHtml(t) {
-  const chips = (t.genres || []).slice(0, 3).map((g) => `<span class="chip">${esc(g)}</span>`);
-  if (t.watched) chips.unshift('<span class="chip watched">↻ Rewatch</span>');
+function chipsHtml(t, max = 2) {
+  const chips = [];
+  if (t.format) chips.push(`<span class="chip format">${FORMAT_LABEL[t.format]}</span>`);
+  if (t.onNetflix === false) chips.push('<span class="chip elsewhere">Not on Netflix</span>');
+  if (t.watched) chips.push('<span class="chip watched">Rewatch</span>');
+  for (const g of (t.genres || []).slice(0, max)) chips.push(`<span class="chip">${esc(g)}</span>`);
   return `<div class="chips">${chips.join('')}</div>`;
 }
 
@@ -132,36 +127,50 @@ function peopleLine(t) {
   return lines.join('');
 }
 
+/** Where to watch: Netflix when it's there, otherwise a lookup of every service in the person's country. */
+function watchLink(t, cls = '') {
+  if (t.onNetflix === false) {
+    const region = (data().settings.region || 'us').toLowerCase();
+    return `<a class="${cls}" href="https://www.justwatch.com/${region}/search?q=${encodeURIComponent(t.title)}" target="_blank" rel="noopener">${icon('play')} Where to watch</a>`;
+  }
+  return `<a class="${cls}" href="${esc(t.netflixUrl)}" target="_blank" rel="noopener">${icon('play')} Watch on Netflix</a>`;
+}
+
+function imdbLink(t, cls = 'plain') {
+  return t.imdbId ? `<a class="${cls}" href="https://www.imdb.com/title/${esc(t.imdbId)}/" target="_blank" rel="noopener">IMDb</a>` : '';
+}
+
+/** Two pages: the poster, then everything else on one calm page. */
 function cardHtml(t) {
   const title = `<h2>${esc(t.title)}<span class="year">${t.year || ''}</span></h2>`;
   return `
-    ${pageHtml(t, 'poster', 'on')}
-    ${pageHtml(t, 'backdrop', 'page-text')}
-    ${pageHtml(t, 'poster', 'page-text')}
-    <div class="card-bars"><span class="on"></span><span></span><span></span></div>
+    <div class="card-face on" data-face="0">
+      ${pageHtml(t)}
+      <div class="card-shade"></div>
+      <div class="card-info">
+        ${title}${metaHtml(t)}
+        <div class="reason">${esc(t.reason?.text || '')}</div>
+        ${chipsHtml(t)}
+      </div>
+    </div>
+    <div class="card-face" data-face="1">
+      <div class="card-back">
+        ${title}
+        <p class="card-overview">${esc(t.overview || 'No description yet.')}</p>
+        <div class="why"><b>Why it's here:</b> ${esc(t.reason?.text || 'Picked for you')}</div>
+        <ul class="facts">
+          ${peopleLine(t)}
+          ${t.imdbVotes ? `<li><b>${t.imdbRating}</b> on IMDb from ${Number(t.imdbVotes).toLocaleString()} votes</li>` : ''}
+        </ul>
+        <div class="chips">${(t.keywords || []).slice(0, 5).map((k) => `<span class="chip">${esc(k)}</span>`).join('')}</div>
+        <div class="card-links">${watchLink(t)}${imdbLink(t)}</div>
+      </div>
+    </div>
+    <div class="card-bars"><span class="on"></span><span></span></div>
     <div class="stamp stamp-like">Like</div>
     <div class="stamp stamp-nope">Nope</div>
     <div class="stamp stamp-super">Must<br>watch</div>
-    <div class="card-shade"></div>
-    <div class="card-info" data-page="0">
-      ${title}${metaHtml(t)}
-      <div class="reason ${t.reason?.kind === 'explore' ? 'explore' : ''}">${esc(t.reason?.text || '')}</div>
-      ${chipsHtml(t)}
-    </div>
-    <div class="card-info" data-page="1" hidden>
-      ${title}
-      <div class="card-overview">${esc(t.overview || 'No description yet.')}</div>
-    </div>
-    <div class="card-info" data-page="2" hidden>
-      ${title}
-      <ul class="why-list">
-        <li>✨ ${esc(t.reason?.text || 'Picked for you')}</li>
-        ${t.imdbVotes ? `<li>⭐ <b>${t.imdbRating}</b> on IMDb from ${Number(t.imdbVotes).toLocaleString()} votes</li>` : ''}
-        ${peopleLine(t)}
-      </ul>
-      <div class="chips">${(t.keywords || []).slice(0, 5).map((k) => `<span class="chip">${esc(k)}</span>`).join('')}</div>
-    </div>
-    <button class="info-btn" aria-label="Open info">${icon('up')}</button>`;
+    <div class="stamp stamp-later">Later</div>`;
 }
 
 // ---------------------------------------------------------------- the stack
@@ -179,10 +188,10 @@ function topCard() {
 /** Keeps DOM cards for queue[0..2] and marks top / next / behind. */
 function layoutDeck() {
   const visible = S.queue.slice(0, 3);
-  for (const el of $$('.card', deckEl)) {
-    if (!visible.some((c) => c.id === el.dataset.id) && !el.classList.contains('fly')) el.remove();
-  }
-  visible.forEach((c, i) => {
+  const keep = new Set(visible.map((c) => c.id));
+  $$('.card', deckEl).forEach((el) => { if (!keep.has(el.dataset.id) && !el.classList.contains('fly')) el.remove(); });
+  [...visible].reverse().forEach((c) => {
+    const i = visible.indexOf(c);
     let el = cardEl(c.id);
     if (!el) {
       el = document.createElement('article');
@@ -200,7 +209,7 @@ function layoutDeck() {
     if (i === 0) el.style.removeProperty('transform');
   });
   updateEmptyState();
-  $('[data-action="rewind"]').disabled = !(S.state?.stats.likes + S.state?.stats.supers + S.state?.stats.nopes);
+  $('[data-action="rewind"]').disabled = !data().swipes.length;
 }
 
 function updateEmptyState() {
@@ -209,10 +218,7 @@ function updateEmptyState() {
   radar.hidden = !empty;
   $('#actions').style.visibility = empty ? 'hidden' : '';
   if (radar.hidden) return;
-  radar.classList.toggle('still', false);
-  radar.style.background = '';
-  $('#radar-progress').hidden = true;
-  $('#radar-text').textContent = S.refilling ? 'Finding titles for you…' : "You've seen everything that matches your settings. Try loosening your filters — or let luck decide.";
+  $('#radar-text').textContent = S.refilling ? 'Finding titles for you…' : "You've seen everything that matches what you asked for. Try changing what you see, or let luck decide.";
   $('#radar-actions').hidden = S.refilling;
 }
 
@@ -244,21 +250,23 @@ const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 function paintDrag(el, dx, dy, grabTop) {
   const w = el.offsetWidth;
   const h = el.offsetHeight;
-  const rot = (dx / w) * 22 * (grabTop ? 1 : -1);
+  const rot = (dx / w) * 18 * (grabTop ? 1 : -1);
   el.style.transform = `translate(${dx}px, ${dy}px) rotate(${rot}deg)`;
-  const like = clamp(dx / (w * 0.25));
-  const nope = clamp(-dx / (w * 0.25));
-  const sup = Math.abs(dy) > Math.abs(dx) ? clamp(-dy / (h * 0.18)) : 0;
-  $('.stamp-like', el).style.opacity = sup ? 0 : like;
-  $('.stamp-nope', el).style.opacity = sup ? 0 : nope;
-  $('.stamp-super', el).style.opacity = sup;
-  $('.act-like').classList.toggle('lit', !sup && like > 0.6);
-  $('.act-nope').classList.toggle('lit', !sup && nope > 0.6);
-  $('.act-super')?.classList.toggle('lit', sup > 0.6);
+  const vertical = Math.abs(dy) > Math.abs(dx);
+  const like = vertical ? 0 : clamp(dx / (w * 0.25));
+  const nope = vertical ? 0 : clamp(-dx / (w * 0.25));
+  const up = vertical && dy < 0 ? clamp(-dy / (h * 0.18)) : 0;
+  const down = vertical && dy > 0 ? clamp(dy / (h * 0.18)) : 0;
+  $('.stamp-like', el).style.opacity = like;
+  $('.stamp-nope', el).style.opacity = nope;
+  $('.stamp-super', el).style.opacity = up;
+  $('.stamp-later', el).style.opacity = down;
+  $('.act-like').classList.toggle('lit', like > 0.6);
+  $('.act-nope').classList.toggle('lit', nope > 0.6);
   const next = S.queue[1] && cardEl(S.queue[1].id);
   if (next) {
     next.style.transition = 'none';
-    next.style.transform = `scale(${0.95 + 0.05 * clamp(Math.hypot(dx, dy) / (w * 0.5))})`;
+    next.style.transform = `scale(${0.96 + 0.04 * clamp(Math.hypot(dx, dy) / (w * 0.5))})`;
   }
 }
 
@@ -271,7 +279,7 @@ function bindDrag(el) {
   let sx, sy, dx, dy, t0, lastX, lastY, lastT, vx, vy, grabTop;
 
   el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || el !== topCard() || e.target.closest('.info-btn')) return;
+    if (e.button !== 0 || el !== topCard() || e.target.closest('a')) return;
     active = true;
     el.setPointerCapture(e.pointerId);
     const r = el.getBoundingClientRect();
@@ -308,8 +316,10 @@ function bindDrag(el) {
       resetDrag(el);
       return onTap(el, e);
     }
+    const vertical = Math.abs(dy) > Math.abs(dx);
     let action = null;
-    if (-dy > h * 0.22 && Math.abs(dy) > Math.abs(dx)) action = 'super';
+    if (vertical && -dy > h * 0.22) action = 'super';
+    else if (vertical && dy > h * 0.22) action = 'later';
     else if (dx > w * 0.35 || (vx > 0.6 && dx > 30)) action = 'like';
     else if (dx < -w * 0.35 || (vx < -0.6 && dx < -30)) action = 'nope';
     if (action) flyOut(el, action, { dx, dy, vx, vy });
@@ -317,10 +327,6 @@ function bindDrag(el) {
   };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
-  $('.info-btn', el).addEventListener('click', (e) => {
-    e.stopPropagation();
-    openDetail(S.queue.find((c) => c.id === el.dataset.id), 'deck');
-  });
 }
 
 function resetDrag(el, spring = false) {
@@ -337,23 +343,20 @@ function resetDrag(el, spring = false) {
 
 function onTap(el, e) {
   const r = el.getBoundingClientRect();
-  if (e.clientY > r.bottom - r.height * 0.28) return openDetail(S.queue.find((c) => c.id === el.dataset.id), 'deck');
   stepPage(el, e.clientX < r.left + r.width / 2 ? -1 : 1);
 }
 
-/** Tinder's tap-through photos: poster → synopsis → why it's here. */
+/** Two pages: tap the right side for the details, the left side to go back to the poster. */
 function stepPage(el, dir) {
-  const pages = $$('.card-page', el);
-  const cur = Number(el.dataset.page);
-  const next = cur + dir;
-  if (next < 0 || next >= pages.length) {
-    el.animate([{ transform: 'none' }, { transform: `perspective(800px) rotateY(${dir * 5}deg)` }, { transform: 'none' }], { duration: 220 });
+  const faces = $$('.card-face', el);
+  const next = Number(el.dataset.page) + dir;
+  if (next < 0 || next >= faces.length) {
+    el.animate([{ transform: 'none' }, { transform: `translateX(${dir * 6}px)` }, { transform: 'none' }], { duration: 160 });
     return;
   }
   el.dataset.page = String(next);
-  pages.forEach((p, i) => p.classList.toggle('on', i === next));
+  faces.forEach((f, i) => f.classList.toggle('on', i === next));
   $$('.card-bars span', el).forEach((b, i) => b.classList.toggle('on', i === next));
-  $$('.card-info', el).forEach((info) => (info.hidden = Number(info.dataset.page) !== next));
 }
 
 function flyOut(el, action, { dx = 0, dy = 0, vy = 0 } = {}) {
@@ -361,15 +364,15 @@ function flyOut(el, action, { dx = 0, dy = 0, vy = 0 } = {}) {
   const h = el.offsetHeight;
   const W = window.innerWidth;
   let x, y, rot;
-  if (action === 'super') {
+  if (action === 'super' || action === 'later') {
     x = dx;
-    y = -(window.innerHeight + h);
-    rot = (dx / w) * 15;
+    y = (action === 'super' ? -1 : 1) * (window.innerHeight + h);
+    rot = (dx / w) * 12;
   } else {
     const dir = action === 'like' ? 1 : -1;
     x = dir * (W / 2 + w * 1.2);
     y = dy + vy * 150;
-    rot = dir * 30;
+    rot = dir * 26;
   }
   $(`.stamp-${action}`, el).style.opacity = 1;
   el.classList.remove('spring');
@@ -383,11 +386,13 @@ function swipeTop(action) {
   const el = topCard();
   if (!el || el.classList.contains('fly')) return;
   const btn = $(`.act-${action}`);
-  btn.classList.add('pressed', 'lit');
-  setTimeout(() => btn.classList.remove('pressed', 'lit'), 220);
-  paintDrag(el, action === 'like' ? 40 : action === 'nope' ? -40 : 0, action === 'super' ? -40 : 0, true);
+  if (btn) { btn.classList.add('pressed', 'lit'); setTimeout(() => btn.classList.remove('pressed', 'lit'), 220); }
+  const nudge = { like: [40, 0], nope: [-40, 0], super: [0, -40], later: [0, 40] }[action];
+  paintDrag(el, nudge[0], nudge[1], true);
   requestAnimationFrame(() => flyOut(el, action));
 }
+
+const SAVED_TOAST = { super: 'Added to Must watch', later: 'Saved for later' };
 
 async function commitSwipe(action) {
   const card = S.queue.shift();
@@ -401,16 +406,11 @@ async function commitSwipe(action) {
   S.swipedThisSession.add(card.id);
   S.swipeCount++;
   if (S.swipeCount >= 3) hideCoach();
+  if (SAVED_TOAST[action]) toast(`${SAVED_TOAST[action]}: ${card.title}`);
+  device.addSwipe(card.id, action);
+  Object.assign(S.state.stats, device.counts());
+  updateBadge();
   layoutDeck();
-  if (action === 'super') toast(`⭐ ${card.title} added to Must watch`);
-  try {
-    device.addSwipe(card.id, action);
-    Object.assign(S.state.stats, device.counts());
-    updateBadge();
-    layoutDeck();
-  } catch (err) {
-    toast(err.message);
-  }
   if (S.queue.length < 5) refill();
 }
 
@@ -418,7 +418,6 @@ async function rewind() {
   try {
     const last = device.popSwipe();
     if (!last) return toast('Nothing to rewind');
-    const { action } = last;
     const [card] = engine.cards(S.catalog, data(), [last.id]);
     if (!card) return;
     S.swipedThisSession.delete(card.id);
@@ -426,7 +425,7 @@ async function rewind() {
     cardEl(card.id)?.remove();
     layoutDeck();
     const el = cardEl(card.id);
-    const from = action === 'like' ? 'translate(120%, 0) rotate(25deg)' : action === 'nope' ? 'translate(-120%, 0) rotate(-25deg)' : 'translate(0, -120%)';
+    const from = { like: 'translate(120%, 0) rotate(22deg)', nope: 'translate(-120%, 0) rotate(-22deg)', super: 'translate(0, -120%)', later: 'translate(0, 120%)' }[last.action];
     el.style.transform = from;
     el.getBoundingClientRect();
     el.classList.add('spring');
@@ -440,7 +439,7 @@ async function rewind() {
   }
 }
 
-// ---------------------------------------------------------------- feeling lucky ("It's a Match!")
+// ---------------------------------------------------------------- feeling lucky
 
 async function feelingLucky(exclude = []) {
   hideCoach();
@@ -449,7 +448,7 @@ async function feelingLucky(exclude = []) {
   setTimeout(() => btn.classList.remove('lit', 'pressed'), 250);
   try {
     const card = engine.lucky(S.catalog, data(), { exclude });
-    if (!card) return toast('You have swiped through everything that matches your settings.');
+    if (!card) return toast('You have swiped through everything that matches what you asked for.');
     showPick(card, exclude);
   } catch (err) {
     toast(err.message);
@@ -459,17 +458,16 @@ async function feelingLucky(exclude = []) {
 function showPick(t, tried) {
   const box = $('#match-inner');
   box.innerHTML = `
-    <h2 class="match-title">It's a Pick!</h2>
-    <p class="match-sub">Highly rated and made for your taste</p>
-    <div class="match-poster">${pageHtml(t, 'poster')}</div>
+    <p class="match-title">Tonight's pick</p>
+    <div class="match-poster">${pageHtml(t)}</div>
     <div class="match-name">${esc(t.title)} <span class="muted">${t.year || ''}</span></div>
-    <div class="match-meta">${ratingHtml(t)}<span>${t.type === 'series' ? 'Series' : 'Movie'}</span>${lengthText(t) ? `<span>${esc(lengthText(t))}</span>` : ''}</div>
+    <div class="match-meta">${ratingHtml(t)}<span>${kindLabel(t)}</span>${lengthText(t) ? `<span>${esc(lengthText(t))}</span>` : ''}</div>
     <div class="match-reason">${esc(t.reason?.text || '')}</div>
     <div class="match-btns">
-      <a class="pill netflix" href="${esc(t.netflixUrl)}" target="_blank" rel="noopener">${icon('play')}&nbsp;Watch on Netflix</a>
-      <button class="pill pill-brand" data-pick="save">Save to Must watch</button>
-      <button class="pill pill-outline" data-pick="again">Another pick</button>
-      <button class="link" data-pick="close">Keep swiping</button>
+      ${watchLink(t, 'btn')}
+      <button class="btn btn-secondary" data-pick="save">Save to Must watch</button>
+      <button class="btn btn-secondary" data-pick="again">Another pick</button>
+      <button class="btn-quiet" data-pick="close">Keep swiping</button>
     </div>`;
   $('#match').hidden = false;
   box.onclick = async (e) => {
@@ -485,7 +483,7 @@ function showPick(t, tried) {
       cardEl(t.id)?.remove();
       layoutDeck();
       refreshState();
-      toast(`⭐ ${t.title} added to Must watch`);
+      toast(`Added to Must watch: ${t.title}`);
       closePick();
     }
   };
@@ -495,30 +493,31 @@ function closePick() {
   $('#match').hidden = true;
 }
 
-// ---------------------------------------------------------------- detail sheet (expanded card)
+// ---------------------------------------------------------------- a title opened from a list
 
 function openDetail(t, from) {
   if (!t) return;
   S.detailFor = { card: t, from };
-  const actions = from === 'deck' || from === 'daily'
-    ? `<button class="act act-lg act-nope" data-d="nope" aria-label="Nope">${icon('nope')}</button>
-       <button class="act act-sm act-super" data-d="super" aria-label="Must watch">${icon('star')}</button>
-       <button class="act act-lg act-like" data-d="like" aria-label="Like">${icon('heart')}</button>`
-    : `<button class="act act-lg act-nope" data-d="remove" aria-label="Remove from likes" title="Remove from likes">${icon('nope')}</button>`;
+  const saved = data().swipes.find((s) => s.id === t.id)?.action;
+  const actions = from === 'daily'
+    ? `<button class="btn btn-secondary" data-d="nope">Not for me</button><button class="btn btn-secondary" data-d="later">Later</button><button class="btn" data-d="like">Like</button>`
+    : saved === 'later'
+      ? `<button class="btn btn-secondary" data-d="remove">Remove</button><button class="btn btn-secondary" data-d="super">Must watch</button><button class="btn" data-d="like">Like</button>`
+      : `<button class="btn btn-secondary" data-d="remove">Remove from saved</button>`;
   $('#detail').innerHTML = `
-    <div class="detail-hero">${pageHtml(t, 'poster')}
+    <div class="detail-hero">${pageHtml(t)}
       <button class="detail-close" data-close aria-label="Close">${icon('down')}</button>
     </div>
     <div class="detail-content">
       <h1>${esc(t.title)}<span class="year">${t.year || ''}</span></h1>
       ${metaHtml(t)}
-      ${t.reason?.text ? `<div class="reason ${t.reason.kind === 'explore' ? 'explore' : ''}">${esc(t.reason.text)}</div>` : ''}
-      ${chipsHtml(t)}
-      <a class="netflix-btn" href="${esc(t.netflixUrl)}" target="_blank" rel="noopener">${icon('play')} Watch on Netflix</a>
-      <div class="detail-section"><h2>About</h2><p>${t.tagline ? `<i>${esc(t.tagline)}</i><br>` : ''}${esc(t.overview || 'No description yet.')}</p></div>
-      ${t.creators?.length || t.cast?.length ? `<div class="detail-section"><ul class="why-list">${peopleLine(t)}</ul></div>` : ''}
-      ${t.keywords?.length ? `<div class="detail-section"><h2>Vibes</h2><div class="tags">${t.keywords.slice(0, 10).map((k) => `<span class="chip">${esc(k)}</span>`).join('')}</div></div>` : ''}
-      ${t.imdbVotes ? `<div class="detail-section"><p>⭐ <b>${t.imdbRating}</b>/10 on IMDb from ${Number(t.imdbVotes).toLocaleString()} votes${t.imdbId ? ` · <a href="https://www.imdb.com/title/${esc(t.imdbId)}/" target="_blank" rel="noopener">IMDb page</a>` : ''}</p></div>` : ''}
+      ${t.reason?.text ? `<p class="muted">${esc(t.reason.text)}</p>` : ''}
+      ${chipsHtml(t, 3)}
+      ${watchLink(t, 'link-btn')}
+      <div class="detail-section"><p>${t.tagline ? `<i>${esc(t.tagline)}</i><br>` : ''}${esc(t.overview || 'No description yet.')}</p></div>
+      ${t.creators?.length || t.cast?.length ? `<div class="detail-section"><ul class="facts">${peopleLine(t)}</ul></div>` : ''}
+      ${t.keywords?.length ? `<div class="detail-section"><div class="chips">${t.keywords.slice(0, 10).map((k) => `<span class="chip">${esc(k)}</span>`).join('')}</div></div>` : ''}
+      ${t.imdbVotes ? `<div class="detail-section"><p><b>${t.imdbRating}</b>/10 on IMDb from ${Number(t.imdbVotes).toLocaleString()} votes${t.imdbId ? ` · <a href="https://www.imdb.com/title/${esc(t.imdbId)}/" target="_blank" rel="noopener">IMDb page</a>` : ''}</p></div>` : ''}
     </div>
     <div class="detail-actions">${actions}</div>`;
   openSheet('#sheet-detail');
@@ -533,22 +532,17 @@ $('#detail').addEventListener('click', async (e) => {
     device.removeSwipe(card.id);
     S.swipedThisSession.delete(card.id);
     toast(`Removed ${card.title}`);
-    await refreshState();
-    loadLikes();
-  } else if (from === 'daily') {
+  } else {
     device.addSwipe(card.id, d);
-    Object.assign(S.state.stats, device.counts());
     S.swipedThisSession.add(card.id);
     S.queue = S.queue.filter((c) => c.id !== card.id);
     cardEl(card.id)?.remove();
     layoutDeck();
-    S.daily = S.daily.filter((c) => c.id !== card.id);
-    renderDaily();
-    toast(d === 'nope' ? `Won't show ${card.title} again` : `${d === 'super' ? '⭐' : '💚'} ${card.title} saved`);
-    refreshState();
-  } else if (topCard()?.dataset.id === card.id) {
-    setTimeout(() => swipeTop(d), 150);
+    toast(d === 'nope' ? `Won't show ${card.title} again` : d === 'later' ? `Saved for later: ${card.title}` : `Saved: ${card.title}`);
   }
+  if (from === 'daily') { S.daily = S.daily.filter((c) => c.id !== card.id); renderDaily(); }
+  await refreshState();
+  if (from === 'likes') loadLikes();
 });
 
 // ---------------------------------------------------------------- sheets
@@ -566,7 +560,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-close]')) closeSheets();
 });
 
-// ---------------------------------------------------------------- discovery settings
+// ---------------------------------------------------------------- what you see (in Profile)
 
 $('#region').innerHTML = Object.entries(REGIONS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
 
@@ -574,21 +568,26 @@ function renderFilters() {
   const s = S.state.settings;
   $$('#types button').forEach((b) => b.classList.toggle('on', b.dataset.types === s.types));
   $('#include-watched').checked = s.includeWatched;
+  $('#include-anywhere').checked = Boolean(s.anywhere);
   $('#min-rating').value = s.minRating;
   $('#min-rating-val').textContent = s.minRating ? `${s.minRating}+` : 'Any';
   $('#region').value = s.region;
-  $('#region-note').textContent = S.state.catalog.source === 'tmdb'
-    ? 'Only titles streaming on Netflix in this country are shown.'
-    : "This country's full Netflix catalog isn't available yet, so you're swiping a built-in sample.";
 }
 
 async function saveSettings(patch, reloadDeck = true) {
   try {
-    const d = device.data();
-    const regionChanged = patch.region && patch.region !== d.settings.region;
+    const d = data();
+    const catalogChanged = ('region' in patch && patch.region !== d.settings.region) || ('anywhere' in patch && patch.anywhere !== d.settings.anywhere);
     Object.assign(d.settings, patch);
     device.save();
-    if (regionChanged) await loadCatalog();
+    if (catalogChanged) {
+      await loadCatalog();
+      if (d.settings.anywhere && !S.catalog.hasWorldwide) {
+        d.settings.anywhere = false;
+        device.save();
+        toast("Titles from other services aren't available yet.");
+      }
+    }
     await refreshState();
     if (reloadDeck) refill(true);
   } catch (err) {
@@ -601,6 +600,7 @@ $('#types').addEventListener('click', (e) => {
   if (b) saveSettings({ types: b.dataset.types });
 });
 $('#include-watched').addEventListener('change', (e) => saveSettings({ includeWatched: e.target.checked }));
+$('#include-anywhere').addEventListener('change', (e) => saveSettings({ anywhere: e.target.checked }));
 $('#min-rating').addEventListener('input', (e) => ($('#min-rating-val').textContent = Number(e.target.value) ? `${e.target.value}+` : 'Any'));
 $('#min-rating').addEventListener('change', (e) => saveSettings({ minRating: Number(e.target.value) }));
 $('#region').addEventListener('change', (e) => saveSettings({ region: e.target.value }));
@@ -608,30 +608,27 @@ $('#region').addEventListener('change', (e) => saveSettings({ region: e.target.v
 // ---------------------------------------------------------------- reset
 
 async function resetSwipes() {
-  if (!confirm('Reset all your swipes? Liked, Must watch and Nope lists are cleared. Your Netflix history stays.')) return;
+  if (!confirm('Reset all your swipes? Liked, Must watch, Later and Nope lists are cleared. Your Netflix history stays.')) return;
   device.resetSwipes();
-  await refreshState();
   S.swipedThisSession.clear();
-  closeSheets();
-  updateBadge();
-  renderProfile();
-  toast('Fresh start — swipes reset');
+  await refreshState();
+  toast('Fresh start. Swipes reset.');
   refill(true);
 }
 
 async function resetAll() {
   if (!confirm('Reset everything? This clears your swipes and imported Netflix history from this device.')) return;
   device.resetEverything();
-  await refreshState();
   S.swipedThisSession.clear();
-  updateBadge();
+  await loadCatalog();
+  await refreshState();
   showWelcome();
   refill(true);
 }
 
-// ---------------------------------------------------------------- likes
+// ---------------------------------------------------------------- saved
 
-async function loadLikes() {
+function loadLikes() {
   try {
     S.likes = engine.likes(S.catalog, data());
   } catch (err) {
@@ -640,16 +637,23 @@ async function loadLikes() {
   renderLikes();
 }
 
+const EMPTY_SAVED = {
+  all: 'Titles you like show up here.',
+  super: 'Swipe up on a title to mark it must-watch.',
+  later: 'Swipe down on a title to decide later.',
+};
+
 function renderLikes() {
-  const list = S.likes.filter((l) => S.likesFilter === 'all' || l.action === 'super');
+  const keep = { all: (l) => l.action === 'like' || l.action === 'super', super: (l) => l.action === 'super', later: (l) => l.action === 'later' }[S.likesFilter];
+  const list = S.likes.filter(keep);
   $('#likes-grid').innerHTML = list.length
     ? list.map((t) => `
       <button class="like-card" data-id="${esc(t.id)}">
-        ${pageHtml(t, 'poster')}
-        ${t.action === 'super' ? `<span class="lc-star">${icon('star')}</span>` : ''}
-        <span class="lc-info"><div class="lc-title">${esc(t.title)}</div><div class="lc-sub">${t.year || ''} · ${t.type === 'series' ? 'Series' : 'Movie'}${t.imdbRating ? ` · ★ ${t.imdbRating}` : ''}</div></span>
+        ${pageHtml(t)}
+        ${t.action === 'super' ? `<span class="lc-mark">${icon('star')}</span>` : ''}
+        <span class="lc-info"><div class="lc-title">${esc(t.title)}</div><div class="lc-sub">${t.year || ''} · ${kindLabel(t)}${t.imdbRating ? ` · ${t.imdbRating.toFixed(1)}` : ''}</div></span>
       </button>`).join('')
-    : `<div class="empty-note"><span class="big">${S.likesFilter === 'super' ? '⭐' : '💚'}</span>${S.likesFilter === 'super' ? 'Swipe up or tap the star to add titles to Must watch.' : 'Titles you swipe right on show up here.'}</div>`;
+    : `<div class="empty-note">${EMPTY_SAVED[S.likesFilter]}</div>`;
 }
 
 $('#likes-grid').addEventListener('click', (e) => {
@@ -668,11 +672,10 @@ $('#likes-filter').addEventListener('click', (e) => {
 
 const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-async function loadDaily() {
+function loadDaily() {
   try {
     const date = localDate();
-    const cards = engine.daily(S.catalog, data(), date);
-    S.daily = cards;
+    S.daily = engine.daily(S.catalog, data(), date);
     $('#daily-date').textContent = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
   } catch (err) {
     toast(err.message);
@@ -684,10 +687,10 @@ function renderDaily() {
   $('#daily-grid').innerHTML = S.daily.length
     ? S.daily.map((t) => `
       <button class="like-card" data-id="${esc(t.id)}">
-        ${pageHtml(t, 'poster')}
-        <span class="lc-info"><div class="lc-title">${esc(t.title)}</div><div class="lc-sub">${t.year || ''} · ${t.type === 'series' ? 'Series' : 'Movie'}${t.imdbRating ? ` · ★ ${t.imdbRating}` : ''}</div><span class="lc-why">${esc(t.reason?.text || '')}</span></span>
+        ${pageHtml(t)}
+        <span class="lc-info"><div class="lc-title">${esc(t.title)}</div><div class="lc-sub">${t.year || ''} · ${kindLabel(t)}${t.imdbRating ? ` · ${t.imdbRating.toFixed(1)}` : ''}</div><span class="lc-why">${esc(t.reason?.text || '')}</span></span>
       </button>`).join('')
-    : '<div class="empty-note"><span class="big">🌤️</span>You\'re all caught up. Fresh picks arrive tomorrow.</div>';
+    : "<div class=\"empty-note\">You're all caught up. Fresh picks arrive tomorrow.</div>";
 }
 
 $('#daily-grid').addEventListener('click', (e) => {
@@ -716,15 +719,14 @@ function timeAgo(iso) {
 function renderProfile() {
   const st = S.state;
   if (!st) return;
-  const swipes = st.stats.likes + st.stats.supers + st.stats.nopes;
-  const strength = Math.min(100, (st.history ? 50 : 0) + Math.min(50, swipes * 2.5));
-  $('#avatar-ring').style.setProperty('--p', strength);
+  const swipes = st.stats.likes + st.stats.supers + st.stats.later + st.stats.nopes;
+  $('#avatar-ring').style.setProperty('--p', Math.min(100, (st.history ? 50 : 0) + Math.min(50, swipes * 2.5)));
   $('#profile-sub').textContent = st.history
     ? `Built from ${st.history.entries.toLocaleString()} Netflix views and ${swipes} swipes`
-    : `Built from ${swipes} swipes — import your Netflix history for better picks`;
+    : `Built from ${swipes} swipes. Add your Netflix history for better picks.`;
 
   $('#stats').innerHTML = [
-    [st.stats.likes, 'Likes'], [st.stats.supers, 'Must watch'], [st.stats.nopes, 'Nopes'],
+    [st.stats.likes, 'Liked'], [st.stats.supers, 'Must watch'], [st.stats.later, 'Later'], [st.stats.nopes, 'Nope'],
   ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
 
   const g = st.taste.genres;
@@ -732,39 +734,22 @@ function renderProfile() {
   $('#taste').innerHTML = g.length
     ? g.map((x) => `<div class="bar-row"><span>${esc(x.name)}</span><div class="bar"><span style="width:${Math.round((x.weight / max) * 100)}%"></span></div></div>`).join('')
       + (st.taste.keywords.length ? `<div class="tags">${st.taste.keywords.map((k) => `<span class="chip">${esc(k.name)}</span>`).join('')}</div>` : '')
-    : '<p class="muted">Swipe a few cards (or import your Netflix history) and your taste shows up here.</p>';
+    : '<p class="muted">Swipe a few titles, or add your Netflix history, and your taste shows up here.</p>';
 
   const h = st.history;
   $('#history').innerHTML = h
-    ? `<p class="muted">${h.source === 'bookmark' ? 'Synced from Netflix' : 'Imported from CSV'} ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} matched to the catalog</p>
+    ? `<p class="muted">Added ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} found in the catalog</p>
        ${h.recent.map((r) => `<div class="hist-row"><span class="${r.matched ? '' : 'unmatched'}">${esc(r.name)}</span><small>${r.kind === 'series' ? `${r.views} ep · ` : ''}${r.lastWatched || ''}</small></div>`).join('')}`
-    : '<p class="muted">No history yet. Tap <b>Sync Netflix</b> to bring your viewing history in.</p>';
+    : '<p class="muted">No history yet. Add it and Swipeflix stops suggesting what you have already watched.</p>';
+  $('#profile-upload').textContent = h ? 'Replace my viewing history (CSV)' : 'Upload viewing history (CSV)';
 
+  const country = REGIONS[st.settings.region] || st.settings.region;
   $('#catalog-info').textContent = st.catalog.source === 'tmdb'
-    ? `Netflix ${REGIONS[st.settings.region] || st.settings.region}: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
-    : `Showing a sample of ${st.catalog.count} Netflix originals. The full catalog for ${REGIONS[st.settings.region] || 'your country'} isn't available yet.`;
+    ? `Netflix ${country}: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
+    : `Showing a sample of ${st.catalog.count} Netflix originals. The full catalog for ${country} isn't available yet.`;
   $('#storage-note').textContent = device.isPersistent()
     ? 'Your history and swipes are saved on this device only. We keep none of it on our servers.'
     : "This browser isn't saving data (private window?). Your swipes will be lost when you close it.";
-  renderJobs();
-}
-
-function statusHtml(job) {
-  if (!job || job.state === 'idle') return null;
-  const running = !['done', 'error'].includes(job.state);
-  return { cls: running ? '' : job.state, html: `${running ? '<span class="spinner"></span>' : job.state === 'done' ? '✅' : '⚠️'}<span>${esc(job.message || '')}</span>` };
-}
-
-function renderJobs() {
-  const nf = statusHtml(S.importJob);
-  for (const id of ['#welcome-status', '#profile-status']) {
-    const el = $(id);
-    el.hidden = !nf;
-    if (nf) {
-      el.className = `sync-status ${nf.cls}`;
-      el.innerHTML = nf.html;
-    }
-  }
 }
 
 $('#open-about').addEventListener('click', () => openSheet('#sheet-about'));
@@ -806,60 +791,52 @@ $('#transfer-claim').addEventListener('click', async () => {
 $('#reset-swipes').addEventListener('click', resetSwipes);
 $('#reset-all').addEventListener('click', resetAll);
 
-// ---------------------------------------------------------------- history import
+// ---------------------------------------------------------------- adding your history (CSV)
 
-function connectNetflix() {
-  openSyncSheet();
+const HOWTO_STEPS = 4;
+let howtoStep = 1;
+
+function showHowtoStep(n) {
+  howtoStep = Math.max(1, Math.min(HOWTO_STEPS, n));
+  $$('.howto-step').forEach((el) => (el.hidden = Number(el.dataset.step) !== howtoStep));
+  $$('#howto-dots i').forEach((d, i) => d.classList.toggle('on', i === howtoStep - 1));
+  $('#howto-back').style.visibility = howtoStep === 1 ? 'hidden' : '';
+  $('#howto-next').style.visibility = howtoStep === HOWTO_STEPS ? 'hidden' : '';
 }
 
-/** Takes the Netflix viewing list (CSV text), reads it here on the phone, and keeps it on this device. */
-async function importHistory(csv, source) {
+/** A short walkthrough of getting the file out of Netflix, shown on the first visit and whenever someone adds history. */
+function openHowto() {
+  showHowtoStep(1);
+  openSheet('#sheet-howto');
+}
+
+$('#howto-next').addEventListener('click', () => showHowtoStep(howtoStep + 1));
+$('#howto-back').addEventListener('click', () => showHowtoStep(howtoStep - 1));
+$('#welcome-add').addEventListener('click', openHowto);
+$('#profile-upload').addEventListener('click', openHowto);
+
+/** Reads the Netflix viewing list (CSV text) here on the phone and keeps it on this device. */
+async function importHistory(csv) {
   const entries = parseViewingHistoryCsv(csv);
   if (!entries.length) throw new Error("That file doesn't look like a Netflix viewing history CSV.");
   const groups = groupHistory(entries).slice(0, 3000);
   const d = device.data();
-  d.history = { source, importedAt: new Date().toISOString(), entries: entries.length, groups, titles: {} };
+  d.history = { source: 'csv', importedAt: new Date().toISOString(), entries: entries.length, groups };
   d.onboarded = true;
   device.save();
   hideWelcome();
+  await loadCatalog(); // the worldwide titles help recognise more of what was watched
   await refreshState();
   refill(true);
-  recogniseHistory();
   return { entries: entries.length, groups };
-}
-
-/**
- * Titles the catalog doesn't have (watched long ago, or no longer on Netflix, or named in another language) are
- * looked up by name on TMDB, a few at a time. Only the names go to our server: no dates, no swipes. Best effort.
- */
-async function recogniseHistory() {
-  const todo = engine.unmatchedGroups(S.catalog, data()).slice(0, 300);
-  if (!todo.length) return;
-  const batch = 8;
-  S.importJob = { state: 'running', message: 'Recognising your watched titles…' };
-  renderJobs();
-  try {
-    for (let i = 0; i < todo.length; i += batch) {
-      const part = todo.slice(i, i + batch);
-      const { ids, titles } = await api.post('/api/history/resolve', { groups: part.map(({ name, kind }) => ({ name, kind })) });
-      ids.forEach((id, j) => { part[j].titleId = id; });
-      Object.assign(device.data().history.titles, titles); // kept on this device, so nobody asks twice
-      S.importJob = { state: 'running', message: `Recognising your watched titles… ${Math.min(todo.length, i + batch)} of ${todo.length}` };
-      renderJobs();
-    }
-  } catch { /* not configured, or busy: matching by name still works */ }
-  device.save();
-  S.importJob = { state: 'done', message: `Imported ${device.data().history.entries.toLocaleString()} views across ${device.data().history.groups.length} titles.` };
-  await refreshState();
-  refill(true);
-  renderJobs();
 }
 
 async function uploadCsv(file) {
   if (!file) return;
   try {
-    const res = await importHistory(await file.text(), 'csv');
-    toast(`Imported ${res.entries.toLocaleString()} views across ${res.groups.length} titles`);
+    const res = await importHistory(await file.text());
+    closeSheets();
+    toast(`Added ${res.entries.toLocaleString()} views across ${res.groups.length} titles`);
   } catch (err) {
     toast(err.message);
   }
@@ -886,41 +863,6 @@ window.addEventListener('drop', (e) => {
   uploadCsv(e.dataTransfer.files[0]);
 });
 
-// ---------------------------------------------------------------- phone sync (bookmark)
-
-function openSyncSheet() {
-  const code = bookmarkletFor(location.origin);
-  $('#sync-code').value = code;
-  $('#sync-copy').onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      toast('Bookmark copied. Paste it as the address of a new bookmark.');
-    } catch {
-      $('#sync-code').select();
-      toast('Select the text below and copy it');
-    }
-  };
-  openSheet('#sheet-sync');
-}
-
-/** The bookmark hands the viewing list back as #import=<base64 csv>. */
-async function importFromHash() {
-  const m = location.hash.match(/^#import=(.+)$/);
-  if (!m) return false;
-  history.replaceState(null, '', location.pathname + location.search);
-  try {
-    const csv = decodeURIComponent(escape(atob(m[1])));
-    const res = await importHistory(csv, 'bookmark');
-    const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-    toast(installed
-      ? `Imported ${res.entries.toLocaleString()} views across ${res.groups.length} titles`
-      : `Imported ${res.groups.length} titles. Using the home-screen app? Profile → Move your data.`);
-  } catch (err) {
-    toast(err.message || 'Could not read that import');
-  }
-  return true;
-}
-
 // ---------------------------------------------------------------- welcome
 
 function showWelcome() {
@@ -931,27 +873,18 @@ function hideWelcome() {
   $('#welcome').hidden = true;
 }
 
-$('#welcome-netflix').addEventListener('click', connectNetflix);
-$('#profile-sync').addEventListener('click', connectNetflix);
-$('#welcome-skip').addEventListener('click', async () => {
+$('#welcome-skip').addEventListener('click', () => {
   device.data().onboarded = true;
   device.save();
   hideWelcome();
 });
 
-// ---------------------------------------------------------------- state & polling
+// ---------------------------------------------------------------- state
 
 async function refreshState() {
   const d = device.data();
   const p = engine.profile(S.catalog, d);
-  S.state = {
-    settings: { ...d.settings },
-    onboarded: d.onboarded,
-    catalog: p.catalog,
-    history: p.history,
-    stats: p.stats,
-    taste: p.taste,
-  };
+  S.state = { settings: { ...d.settings }, onboarded: d.onboarded, catalog: p.catalog, history: p.history, stats: p.stats, taste: p.taste };
   updateBadge();
   renderFilters();
   renderProfile();
@@ -993,37 +926,27 @@ function hideCoach() {
 document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-action]')?.dataset.action;
   if (!a) return;
-  if (a === 'like' || a === 'nope' || a === 'super') swipeTop(a);
+  if (a === 'like' || a === 'nope') swipeTop(a);
   else if (a === 'rewind') rewind();
   else if (a === 'lucky') feelingLucky();
-  else if (a === 'filters') openSheet('#sheet-filters');
-  else if (a === 'reset') resetSwipes();
+  else if (a === 'filters') showTab('profile');
 });
-$('#btn-filters').addEventListener('click', () => openSheet('#sheet-filters'));
 $('#btn-daily').addEventListener('click', () => showTab('daily'));
 $('#daily-back').addEventListener('click', () => showTab('discover'));
 
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape') { closeSheets(); closePick(); return; }
-  const onDeck = !$('#view-discover').hidden && $('#welcome').hidden && $('#match').hidden;
-  const detailOpen = !$('#sheet-detail').hidden;
-  if (detailOpen && e.key === 'ArrowDown') { e.preventDefault(); closeSheets(); return; }
-  if (!onDeck || !$('#sheet-filters').hidden) return;
-  const keyMap = { ArrowLeft: 'nope', ArrowRight: 'like', Enter: 'super' };
+  const anySheet = $$('.sheet').some((s) => !s.hidden);
+  if (!$('#view-discover') || $('#view-discover').hidden || !$('#welcome').hidden || !$('#match').hidden || anySheet) return;
+  const keyMap = { ArrowLeft: 'nope', ArrowRight: 'like', ArrowUp: 'super', Enter: 'super', ArrowDown: 'later' };
   if (keyMap[e.key]) {
     e.preventDefault();
-    if (detailOpen) closeSheets();
     swipeTop(keyMap[e.key]);
-  } else if (detailOpen) {
-    return;
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    openDetail(S.queue[0], 'deck');
   } else if (e.key === ' ') {
     e.preventDefault();
     const el = topCard();
-    if (el) stepPage(el, Number(el.dataset.page) >= 2 ? -2 : 1);
+    if (el) stepPage(el, Number(el.dataset.page) >= 1 ? -1 : 1);
   } else if (e.key === 'Backspace') {
     e.preventDefault();
     rewind();
@@ -1046,7 +969,6 @@ async function init() {
   const st = await refreshState();
   if (!st.onboarded) showWelcome();
   if (!device.isPersistent()) toast("This browser isn't saving data, so your swipes won't be kept.");
-  await importFromHash();
   await refill(true);
   let seenCoach = false;
   try { seenCoach = Boolean(localStorage.getItem('swipeflix.coach')); } catch {}
@@ -1054,7 +976,6 @@ async function init() {
     $('#coach').hidden = false;
     setTimeout(hideCoach, 9000);
   }
-  if (d.history && engine.unmatchedGroups(S.catalog, d).length) recogniseHistory();
 }
 
 init();

@@ -1,14 +1,14 @@
 {
   "name": "Swipeflix",
   "short_name": "Swipeflix",
-  "description": "Swipe right on your next Netflix binge.",
+  "description": "Swipe your way to what to watch next.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0e1014",
-  "theme_color": "#0e1014",
+  "background_color": "#FAFAF8",
+  "theme_color": "#FAFAF8",
   "categories": [
     "entertainment"
   ],

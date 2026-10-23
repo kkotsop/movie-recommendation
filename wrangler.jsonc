@@ -11,17 +11,21 @@
     "run_worker_first": ["/api/*"]
   },
 
-  // Shared TMDB lookups, rate limits and device-transfer codes. Never anyone's history or swipes.
+  // One-time device-transfer codes and counters against code-guessing. Never anyone's history or swipes.
   "durable_objects": { "bindings": [{ "name": "SHARED", "class_name": "Shared" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Shared"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Shared"] }
+  ],
+
+  // Rate limit on every /api call, per visitor. Free, and works on workers.dev addresses where zone firewall rules do not.
+  "ratelimits": [
+    { "name": "API_LIMITER", "namespace_id": "4721", "simple": { "limit": 60, "period": 60 } }
+  ],
 
   "vars": {
-    // Where the scheduled GitHub job publishes the country catalogs (the `data` branch of your repo).
+    // Where the scheduled GitHub job publishes the catalogs (the `data` branch of your repo).
     "CATALOG_BASE": "https://raw.githubusercontent.com/kkotsop/movie-recommendation/data/catalog"
   },
 
   "observability": { "enabled": true }
-
-  // Optional secret, for recognising watched titles the catalog doesn't have (never in this file):
-  //   npx wrangler secret put TMDB_API_KEY
 }

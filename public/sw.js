@@ -3,15 +3,15 @@
 //  - country catalogs (/api/catalog/XX, not personal): cached, refreshed in the background
 //  - posters (TMDB images): cached the first time they are seen
 //  - everything else under /api (history lookups, transfer codes) always goes straight to the network
-const VERSION = 'v9';
+const VERSION = 'v11';
 const SHELL = `swipeflix-shell-${VERSION}`;
 const CATALOGS = `swipeflix-catalogs-${VERSION}`;
 const IMAGES = `swipeflix-images-${VERSION}`;
 const MAX_IMAGES = 300;
 const SHELL_FILES = [
-  '/', '/app.css', '/app.js', '/netflix-export.js', '/device-store.js',
+  '/', '/app.css', '/app.js', '/device-store.js',
   '/lib/engine.js', '/lib/recommender.js', '/lib/history.js', '/lib/match.js', '/lib/regions.js', '/demo-catalog.json',
-  '/icon.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest',
+  '/icon.svg', '/tmdb-logo.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest',
 ];
 
 self.addEventListener('install', (event) => {
