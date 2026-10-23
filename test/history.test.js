@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, parseViewingHistoryCsv, seriesNameFromTitle, groupHistory, normalizeTitle } from '../src/history.js';
+import { parsePastedHistory, parseCsv, parseViewingHistoryCsv, seriesNameFromTitle, groupHistory, normalizeTitle } from '../src/history.js';
 
 test('parseCsv handles quotes, commas and CRLF', () => {
   const rows = parseCsv('﻿Title,Date\r\n"Love, Death & Robots: Volume 1: ""Sonnie\'s Edge""",3/15/19\r\n');
@@ -58,4 +58,14 @@ test('files that are not viewing history are rejected, headerless title,date row
   assert.deepEqual(parseViewingHistoryCsv('hello world\nsome notes'), []);
   assert.deepEqual(parseViewingHistoryCsv('name,age\nBob,31'), []);
   assert.equal(parseViewingHistoryCsv('"Roma","12/25/22"\n"Okja","1/2/23"').length, 2);
+});
+
+test('pasted page text: date line then title, or both on one line, junk ignored', () => {
+  const text = 'Viewing activity for Kostas\n\n10/23/26\nDark: Season 3: Deja-vu\nReport a problem\n10/22/26\tThe Irishman\n9/1/26\nUncut Gems\nShow More\n';
+  assert.deepEqual(parsePastedHistory(text), [
+    { date: '10/23/26', title: 'Dark: Season 3: Deja-vu' },
+    { date: '10/22/26', title: 'The Irishman' },
+    { date: '9/1/26', title: 'Uncut Gems' },
+  ]);
+  assert.deepEqual(parsePastedHistory('just some words'), []);
 });

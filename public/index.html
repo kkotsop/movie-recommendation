@@ -175,18 +175,40 @@
       <div class="sheet-backdrop" data-close></div>
       <div class="sheet-body">
         <div class="sheet-head"><span></span><h2 id="connect-title">Connect Netflix</h2><button class="link link-brand" data-close>Close</button></div>
-        <p class="muted ext-intro">Nothing to install and no file to download. You add one bookmark, and it reads the Viewing activity page <b>you're already logged in to</b>.</p>
-        <ol class="steps">
-          <li><b>Show your bookmarks bar</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>, or <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>B</kbd> on a Mac).</li>
-          <li><b>Drag this button up onto it</b> (one time only):
-            <a class="bm" id="bm-link" href="#" draggable="true">⚡ Sync Netflix</a>
-          </li>
-          <li><b>Open your viewing activity</b> on Netflix, logged in as the profile you want:
-            <a class="pill pill-brand pill-sm" href="https://www.netflix.com/viewingactivity" target="_blank" rel="noopener">Open Netflix</a>
-          </li>
-          <li><b>Click the “⚡ Sync Netflix” bookmark.</b> It reads the list (a minute for long histories) and a SwipeFlick tab fills up. Allow pop-ups if your browser asks.</li>
-        </ol>
-        <p class="muted">Works in Chrome, Edge, Firefox and Safari on a computer. On a phone, use <b>Upload viewing history (CSV)</b> instead.</p>
+        <div class="desktop-only">
+          <p class="muted ext-intro">Nothing to install and no file to download. You add one bookmark, and it reads the Viewing activity page <b>you're already logged in to</b>.</p>
+          <ol class="steps">
+            <li><b>Show your bookmarks bar</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>, or <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>B</kbd> on a Mac).</li>
+            <li><b>Drag this button up onto it</b> (one time only):
+              <a class="bm" id="bm-link" href="#" draggable="true">⚡ Sync Netflix</a>
+            </li>
+            <li><b>Open your viewing activity</b> on Netflix, logged in as the profile you want:
+              <a class="pill pill-brand pill-sm" href="https://www.netflix.com/viewingactivity" target="_blank" rel="noopener">Open Netflix</a>
+            </li>
+            <li><b>Click the “⚡ Sync Netflix” bookmark.</b> It reads the list (a minute for long histories) and a SwipeFlick tab fills up. Allow pop-ups if your browser asks.</li>
+          </ol>
+        </div>
+
+        <div class="mobile-only">
+          <p class="muted ext-intro">On a phone, Netflix lets you save your viewing history as a small file from its website. Then you pick it here. Takes about a minute.</p>
+          <ol class="steps">
+            <li><b>Open Netflix in your phone's browser</b> (not the Netflix app):
+              <a class="pill pill-brand pill-sm" href="https://www.netflix.com/viewingactivity" target="_blank" rel="noopener">Open Netflix</a>
+              <small class="muted">If it jumps into the app, open that link from your browser's address bar instead, or choose “Desktop site” in the browser menu.</small>
+            </li>
+            <li><b>Log in, choose your profile, scroll to the very bottom and tap “Download all”.</b> It saves <code>NetflixViewingHistory.csv</code> (on iPhone: Files → Downloads).</li>
+            <li><b>Come back here and pick the file:</b>
+              <label class="pill pill-brand pill-sm" for="csv-input">Choose file</label>
+            </li>
+          </ol>
+        </div>
+
+        <details class="paste-box">
+          <summary>Can't download the file? Paste instead</summary>
+          <p class="muted">On the Viewing activity page, tap “Show more” until your history is loaded, then select all the text, copy it and paste it here.</p>
+          <textarea id="paste-text" rows="5" placeholder="Paste the page text (or CSV contents) here" spellcheck="false"></textarea>
+          <button class="pill pill-brand pill-sm" id="paste-import">Import</button>
+        </details>
       </div>
     </div>
 
@@ -203,7 +225,7 @@
 
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="drop-hint" id="drop-hint" hidden>Drop your NetflixViewingHistory.csv</div>
-    <input type="file" id="csv-input" accept=".csv,text/csv" hidden>
+    <input type="file" id="csv-input" accept=".csv,text/csv,text/comma-separated-values,application/vnd.ms-excel,text/plain" hidden>
   </div>
 
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">

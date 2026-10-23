@@ -58,7 +58,7 @@ Netflix has no public API or "sign in with Netflix" for third-party apps, so the
 
 1. **Sync Netflix bookmark (works with the hosted site too, nothing to install).** In the app, tap **Connect Netflix** and drag the **⚡ Sync Netflix** button onto your bookmarks bar, once. Then open netflix.com/viewingactivity (logged in as the profile you want) and click the bookmark. It reads the list on the page you're looking at (a minute for long histories) and opens SwipeFlick with your history loaded. The bookmark is generated for the address you opened the app from, so there's nothing to paste. Needs a desktop browser and pop-ups allowed.
 2. **Log in with Netflix (local app only).** SwipeFlick opens its own Chrome/Edge window on netflix.com. **You** log in and pick a profile there; the app never sees your password.
-3. **Upload the CSV.** On netflix.com: *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv`.
+3. **Upload the CSV, or paste the page text (the way on a phone).** On netflix.com: *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv`. On a **phone** (where bookmarks can't be dragged), open that page in your phone's browser, tap *Download all*, then choose the file in SwipeFlick. If you can't get the file, tap *Show more* until the list is loaded, select all the text on the page, copy it and paste it into the box under *Connect Netflix → Paste instead*.
 
 > The bookmark and option 2 read the Viewing activity page's HTML, so a Netflix redesign can break them. The CSV upload keeps working. Netflix's terms don't allow automated access to their site, so use these at your own discretion; everything stays on your computer.
 

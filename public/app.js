@@ -1,4 +1,5 @@
 // SwipeFlick client: Tinder's card stack, gestures and screens for movies & series.
+import { parsePastedHistory } from './src/history.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -812,6 +813,30 @@ async function openConnectGuide() {
   $('#bm-link').href = bookmarkletHref(location.origin);
   openSheet('#sheet-connect');
 }
+/** Phones can't drag bookmarks: show the file/paste steps instead. */
+const isMobile = matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+document.body.classList.toggle('is-mobile', isMobile);
+
+$('#paste-import').addEventListener('click', async () => {
+  const text = $('#paste-text').value;
+  if (!text.trim()) return toast('Paste your viewing activity first');
+  try {
+    const looksLikeCsv = /^\uFEFF?"?title"?\s*,/i.test(text.trim());
+    const rows = looksLikeCsv ? [] : parsePastedHistory(text);
+    if (!looksLikeCsv && !rows.length) throw new Error("That doesn't look like Netflix viewing activity. Copy the whole page after tapping “Show more”.");
+    const res = looksLikeCsv ? await api.post('/api/history/csv', text, true) : await api.post('/api/history/entries', { rows });
+    $('#paste-text').value = '';
+    closeSheets();
+    hideWelcome();
+    toast(`Imported ${res.entries.toLocaleString()} views across ${res.titles} titles`);
+    await refreshState();
+    refill(true);
+    startPolling();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
 $('#bm-link').addEventListener('click', (e) => {
   e.preventDefault();
   toast('Drag this button up to your bookmarks bar — don’t click it here');

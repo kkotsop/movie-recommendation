@@ -122,6 +122,14 @@ async function dispatch(req, url) {
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
 function serveStatic(url, res) {
+  // The browser build shares these pure modules; nothing else under src/ is public.
+  if (['/src/history.js', '/src/engine.js', '/src/recommender.js'].includes(url.pathname)) {
+    return fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), url.pathname), (err, data) => {
+      if (err) return send(res, 404, { error: 'Not found' });
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+      res.end(data);
+    });
+  }
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
   const file = path.join(PUBLIC, rel);
   if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'Forbidden' });

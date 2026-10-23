@@ -331,3 +331,13 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .steps kbd { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font: 12px system-ui; box-shadow: 0 2px 0 #000; }
 .bm { display: inline-block; margin-top: 10px; padding: 12px 20px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; cursor: grab; box-shadow: 0 4px 14px rgba(0, 0, 0, .4); }
 .bm:active { cursor: grabbing; }
+
+.mobile-only { display: none; }
+body.is-mobile .desktop-only { display: none; }
+body.is-mobile .mobile-only { display: block; }
+.steps small { display: block; margin-top: 6px; }
+.steps label.pill { cursor: pointer; }
+.paste-box { margin-top: 18px; background: var(--surface); border-radius: 12px; padding: 12px 14px; }
+.paste-box summary { cursor: pointer; font-weight: 700; }
+.paste-box p { margin: 10px 0; }
+.paste-box textarea { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; color: var(--text); font: 13px/1.4 ui-monospace, monospace; margin-bottom: 10px; resize: vertical; }

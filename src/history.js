@@ -180,3 +180,25 @@ export function resolveByTitle(groups, titles) {
     return { ...g, titleId: t && (g.kind !== 'series' || t.type === 'series') ? t.id : null };
   });
 }
+
+/**
+ * Text copied from Netflix's Viewing activity page ("select all, copy") or a pasted
+ * CSV. Rows look like a date line followed by the title line, or "date title" on one
+ * line. Anything else on the page (menus, "Report a problem", ...) is ignored.
+ * Returns [{title, date}] with the date as written, ready for entriesFromRows.
+ */
+export function parsePastedHistory(text) {
+  const DATE = /^\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}$/;
+  const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const same = lines[i].match(/^(\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4})\s+(\S.*)$/);
+    if (DATE.test(lines[i]) && lines[i + 1] && !DATE.test(lines[i + 1])) {
+      rows.push({ date: lines[i], title: lines[i + 1] });
+      i++;
+    } else if (same) {
+      rows.push({ date: same[1], title: same[2] });
+    }
+  }
+  return rows;
+}
