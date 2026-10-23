@@ -11,7 +11,7 @@
 //   afterSettings?(changes),    // changes: {catalogChanged}
 //   resetAll?(),                // scope "all": return a fresh state
 // }
-import { parseViewingHistoryCsv, groupHistory, resolveByTitle } from './history.js';
+import { parseViewingHistoryCsv, entriesFromRows, groupHistory, resolveByTitle } from './history.js';
 import { buildProfile, nextDeck, feelingLucky, topTastes, explain } from './recommender.js';
 
 const ids = (q) => new Set((q.get('exclude') || '').split(',').filter(Boolean));
@@ -145,6 +145,16 @@ export function createEngine(host) {
       const entries = parseViewingHistoryCsv(text);
       if (!entries.length) return [400, { error: "That file doesn't look like a Netflix viewing history CSV." }];
       const h = importHistory(entries, 'csv');
+      return { ok: true, entries: h.entries, titles: h.groups.length };
+    },
+
+    // From the browser extension: [{title, date}] with the date as Netflix wrote it.
+    'POST /api/history/entries': (q, { rows } = {}) => {
+      const entries = Array.isArray(rows)
+        ? entriesFromRows(rows.slice(0, 200000).filter((r) => r && typeof r.title === 'string').map((r) => ({ title: r.title, date: typeof r.date === 'string' ? r.date : '' })))
+        : [];
+      if (!entries.length) return [400, { error: 'No viewing activity was found.' }];
+      const h = importHistory(entries, 'extension');
       return { ok: true, entries: h.entries, titles: h.groups.length };
     },
 

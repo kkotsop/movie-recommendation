@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "SwipeFlick for Netflix",
+  "version": "1.0.0",
+  "description": "Sends your Netflix viewing activity to SwipeFlick so it can recommend what to watch next. Runs only when you click it.",
+  "action": { "default_title": "SwipeFlick", "default_popup": "popup.html" },
+  "permissions": ["scripting", "storage"],
+  "host_permissions": ["https://www.netflix.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+}

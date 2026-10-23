@@ -778,6 +778,44 @@ window.addEventListener('drop', (e) => {
   uploadCsv(e.dataTransfer.files[0]);
 });
 
+// ---------------------------------------------------------------- browser extension hand-off
+
+let extensionImporting = false;
+window.addEventListener('message', async (e) => {
+  const d = e.data;
+  if (e.source !== window || e.origin !== location.origin || d?.source !== 'swipeflick-extension' || d.type !== 'history') return;
+  if (extensionImporting) return; // the extension retries until we answer
+  extensionImporting = true;
+  const ack = (body) => window.postMessage({ source: 'swipeflick-app', type: 'history-ack', ...body }, location.origin);
+  try {
+    const res = typeof d.csv === 'string' ? await api.post('/api/history/csv', d.csv, true) : await api.post('/api/history/entries', { rows: d.rows });
+    ack({ ok: true, entries: res.entries, titles: res.titles });
+    closeSheets();
+    hideWelcome();
+    toast(`Imported ${res.entries.toLocaleString()} views across ${res.titles} titles`);
+    await refreshState();
+    refill(true);
+    startPolling();
+  } catch (err) {
+    ack({ ok: false, error: err.message });
+  } finally {
+    extensionImporting = false;
+  }
+});
+
+function openExtensionGuide() {
+  $('#ext-address').textContent = location.origin;
+  openSheet('#sheet-extension');
+}
+$('#ext-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(location.origin);
+    toast('Address copied');
+  } catch {
+    toast('Select the address and copy it');
+  }
+});
+
 // ---------------------------------------------------------------- welcome
 
 function showWelcome() {
@@ -873,6 +911,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'rewind') rewind();
   else if (a === 'lucky') feelingLucky();
   else if (a === 'filters') openSheet('#sheet-filters');
+  else if (a === 'extension') openExtensionGuide();
   else if (a === 'reset') resetSwipes();
 });
 $('#btn-filters').addEventListener('click', () => openSheet('#sheet-filters'));

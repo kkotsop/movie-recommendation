@@ -7,6 +7,7 @@ import { loadState, saveState, DEFAULT_SETTINGS } from './src/store.js';
 import { loadDemoCatalog, buildTmdbCatalog, cachedTmdbCatalog } from './src/catalog.js';
 import { createEngine } from './src/engine.js';
 import { syncFromNetflix, forgetNetflixLogin } from './src/netflix.js';
+import { zipDirectory } from './scripts/zip.mjs';
 
 const PORT = Number(process.env.PORT) || 4173;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -121,7 +122,13 @@ async function dispatch(req, url) {
 
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+
 function serveStatic(url, res) {
+  if (url.pathname === '/swipeflick-extension.zip') {
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="swipeflick-extension.zip"' });
+    return res.end(zipDirectory(path.join(ROOT, 'extension'), 'swipeflick-extension'));
+  }
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
   const file = path.join(PUBLIC, rel);
   if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'Forbidden' });

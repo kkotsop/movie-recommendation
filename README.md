@@ -48,16 +48,19 @@ npm run deploy      # builds, then runs `wrangler deploy` (first time: it opens 
 ```
 
 The hosted version differs from the local app in three ways, all because it has no server:
-- no **Log in with Netflix**: upload the viewing-history CSV instead. The file is parsed in the browser and never leaves it.
+- no **Log in with Netflix** window. Use the browser extension or upload the CSV instead; either way the data goes into your browser's storage only and is never uploaded anywhere.
 - it swipes through the built-in catalog of 100 Netflix originals, without the TMDB key or country picker.
 - swipes and history are saved in the visitor's own browser (`localStorage`), so everyone gets their own private profile. "Reset everything" deletes it.
 
 ## Getting your Netflix history in
 
-Netflix has no public API, so there are two ways:
+Netflix has no public API or "sign in with Netflix" for third-party apps, so there are three ways:
 
-1. **Log in with Netflix** (welcome screen or *Profile → Sync Netflix*). A normal browser window opens on netflix.com. **You** type your password and pick your profile on Netflix's own page, so SwipeFlick never sees your credentials. The app then opens your *Viewing activity* page, takes the same CSV that "Download all" gives you, and closes the window. The browser session is kept in `data/browser-profile`, so the next sync won't ask you to log in again (*Reset everything* deletes it).
-2. **Upload the CSV.** On netflix.com go to *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv` or drag it onto the window.
+1. **Browser extension (works with the hosted site too).** `extension/` is a small Chrome/Edge extension. Install it once (the app's **Connect Netflix** button walks you through it: download `swipeflick-extension.zip`, then `chrome://extensions` → Developer mode → Load unpacked), paste your SwipeFlick address into its popup and press **Sync my Netflix**. It opens `netflix.com/viewingactivity` in a background tab using **your own login**, expands the list, reads the rows, closes the tab, and hands the data to your SwipeFlick tab. It only runs when you click it, and it only has access to netflix.com plus the SwipeFlick address you allow. If Netflix asks you to log in or pick a profile, do that in the tab it opens and press Sync again. It reads whichever profile is active in your browser.
+2. **Log in with Netflix (local app only).** SwipeFlick opens its own Chrome/Edge window on netflix.com. **You** log in and pick a profile there; the app never sees your password.
+3. **Upload the CSV.** On netflix.com: *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv`.
+
+> The extension and option 2 read the Viewing activity page's HTML, so a Netflix redesign can break them. The CSV upload keeps working. Netflix's terms don't allow automated access to their site, so use these at your own discretion; everything stays on your computer.
 
 The parser handles US and European date formats and groups episodes into shows ("Dark: Season 2: …" becomes *Dark*). It recognises season markers in English, Greek, German, French, Spanish, Italian and other languages.
 
@@ -119,6 +122,8 @@ src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
 src/engine.js          the API as pure functions, shared by the server and the browser build
 src/imdb.js            IMDb ratings dataset download + lookup
 src/netflix.js         "Log in with Netflix" browser flow (Playwright)
+extension/             Chrome/Edge extension that sends your Viewing activity to the app
+scripts/zip.mjs        tiny zip writer for the extension download
 src/store.js           JSON state in ./data (swipes, settings, imported history)
 public/                the Tinder-style UI (vanilla HTML/CSS/JS); local-api.js is the in-browser backend
 scripts/build-static.mjs  builds dist/ for static hosting; wrangler.jsonc = Cloudflare config

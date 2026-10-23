@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { color-scheme: dark; }
+    body { width: 320px; margin: 0; padding: 18px; background: #0e1014; color: #f4f6fb; font: 14px/1.4 system-ui, sans-serif; }
+    h1 { margin: 0 0 4px; font-size: 20px; background: linear-gradient(45deg, #14d9c4, #6c5cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    p { margin: 0 0 14px; color: #8b93a7; }
+    label { display: block; font-size: 12px; color: #8b93a7; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 8px; border: 1px solid #2a2f3a; background: #20242d; color: inherit; font: inherit; margin-bottom: 14px; }
+    button { width: 100%; height: 44px; border: 0; border-radius: 22px; background: linear-gradient(45deg, #14d9c4, #6c5cff); color: #fff; font: 700 14px system-ui; letter-spacing: .4px; text-transform: uppercase; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: default; }
+    #status { margin-top: 12px; min-height: 20px; }
+    #status.err { color: #ffb3c0; }
+    #status.ok { color: #a6f4d2; }
+  </style>
+</head>
+<body>
+  <h1>SwipeFlick</h1>
+  <p>Reads your Netflix viewing activity and sends it to SwipeFlick. Nothing is sent anywhere else.</p>
+  <label for="app">SwipeFlick address</label>
+  <input id="app" type="url" placeholder="http://localhost:4173" spellcheck="false">
+  <button id="sync">Sync my Netflix</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

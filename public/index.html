@@ -18,6 +18,8 @@
         <p class="welcome-tagline">Swipe right on your next binge.</p>
         <div class="welcome-actions">
           <button class="pill pill-white" id="welcome-netflix" data-needs="netflixLogin">Log in with Netflix</button>
+          <button class="pill pill-white" data-action="extension" data-hosted>Connect Netflix</button>
+          <button class="pill pill-outline" data-action="extension" data-needs="netflixLogin">Use the browser extension</button>
           <label class="pill pill-outline" for="csv-input">Upload viewing history (CSV)</label>
           <button class="link" id="welcome-skip">Skip — just start swiping</button>
         </div>
@@ -90,6 +92,7 @@
           <div class="hero-actions">
             <button class="hero-btn" data-action="filters"><span><svg viewBox="0 0 24 24"><use href="#i-sliders"/></svg></span>Settings</button>
             <button class="hero-btn hero-btn-main" id="profile-sync" data-needs="netflixLogin"><span><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>Sync Netflix</button>
+            <button class="hero-btn hero-btn-main" data-action="extension" data-hosted><span><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>Connect Netflix</button>
             <label class="hero-btn" for="csv-input"><span><svg viewBox="0 0 24 24"><use href="#i-upload"/></svg></span>Upload CSV</label>
           </div>
           <div class="sync-status" id="profile-status" hidden></div>
@@ -164,6 +167,24 @@
         <div class="group">
           <button class="danger-row" data-action="reset">Reset swipes</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Connect Netflix (browser extension) -->
+    <div class="sheet" id="sheet-extension" role="dialog" aria-modal="true" aria-labelledby="ext-title" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <div class="sheet-body">
+        <div class="sheet-head"><span></span><h2 id="ext-title">Connect Netflix</h2><button class="link link-brand" data-close>Close</button></div>
+        <p class="muted ext-intro">A small extension for Chrome or Edge reads your Viewing activity with <b>your own</b> Netflix login and sends it here. No Netflix file to download or upload, and it only runs when you click it.</p>
+        <ol class="steps">
+          <li><b>Get the extension.</b> <a class="pill pill-brand pill-sm" href="swipeflick-extension.zip" download>Download</a> and unzip it.</li>
+          <li><b>Add it to your browser.</b> Open <code>chrome://extensions</code> (or <code>edge://extensions</code>), switch on <b>Developer mode</b>, click <b>Load unpacked</b> and choose the unzipped <code>swipeflick-extension</code> folder.</li>
+          <li><b>Press Sync.</b> Click the SwipeFlick puzzle-piece icon, paste this address, then press <b>Sync my Netflix</b>:
+            <div class="copy-row"><code id="ext-address"></code><button class="pill pill-outline pill-sm" id="ext-copy">Copy</button></div>
+          </li>
+          <li>If Netflix asks you to log in or choose a profile, do that in the tab it opens and press Sync again. The tab closes by itself and you land back here with your history loaded.</li>
+        </ol>
+        <p class="muted">It reads the Netflix profile that is currently active in your browser. Switch profiles on Netflix first if you want a different one.</p>
       </div>
     </div>
 

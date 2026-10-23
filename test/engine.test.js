@@ -92,3 +92,19 @@ test('lucky respects excludes and reset clears swipes (or everything)', () => {
   assert.equal(all.history, null);
   assert.equal(all.onboarded, false);
 });
+
+test('extension rows import like a CSV, rejecting empty or malformed payloads', () => {
+  const { r } = setup();
+  assert.equal(r['POST /api/history/entries'](q(), { rows: [] })[0], 400);
+  assert.equal(r['POST /api/history/entries'](q(), {})[0], 400);
+  assert.equal(r['POST /api/history/entries'](q(), { rows: [null, { title: 5 }] })[0], 400);
+  const res = r['POST /api/history/entries'](q(), { rows: [
+    { title: 'Dark: Season 1: Secrets', date: '20/10/2026' },
+    { title: 'Dark: Season 1: Lies', date: '21/10/2026' },
+    { title: 'The Irishman', date: '15/05/2026' },
+  ] });
+  assert.deepEqual([res.entries, res.titles], [3, 2]);
+  const st = r['GET /api/state'](q());
+  assert.equal(st.history.source, 'extension');
+  assert.equal(st.history.recent[0].lastWatched, '2026-10-21', 'day-first dates detected');
+});
