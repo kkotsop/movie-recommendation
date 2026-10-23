@@ -8,7 +8,7 @@ const blank = () => ({
   onboarded: false,
   settings: { includeWatched: false, types: 'both', minRating: 0, region: null },
   swipes: [], // [{id, action: 'like'|'super'|'nope', at}]
-  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched}]}
+  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched, titleId}]}
 });
 
 let mem = null;
@@ -99,7 +99,7 @@ export function requestBody(extra = {}) {
     swipes: d.swipes.map(({ id, action, at }) => ({ id, action, at })),
     history: d.history && {
       source: d.history.source, importedAt: d.history.importedAt, entries: d.history.entries,
-      groups: d.history.groups.map(({ name, kind, views, firstWatched, lastWatched }) => ({ name, kind, views, firstWatched, lastWatched })),
+      groups: d.history.groups.map(({ name, kind, views, firstWatched, lastWatched, titleId }) => ({ name, kind, views, firstWatched, lastWatched, titleId })),
     },
     ...extra,
   };

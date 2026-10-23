@@ -4,6 +4,10 @@ import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const WRANGLER = path.join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -11,20 +15,27 @@ const freePort = () => new Promise((resolve, reject) => {
   s.on('error', reject);
 });
 
-/** Starts server.js on a free port with an empty data dir. Returns {base, call, stop}. */
-export async function startServer(env = {}) {
+/**
+ * Starts the real Worker locally (Wrangler's local runtime, with its own R2 and Durable Object storage)
+ * on a free port with empty storage. Returns {base, call, stop, dir}.
+ * `vars` become Worker variables/secrets, e.g. {TMDB_API_KEY: '...'}.
+ */
+export async function startServer(vars = {}) {
   const port = await freePort();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-api-'));
-  const child = spawn(process.execPath, ['server.js'], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', SWIPEFLICK_DATA: dir, TMDB_API_KEY: '', HOSTED: '', ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-worker-'));
+  const args = [WRANGLER, 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', dir, '--inspector-port', '0', '--test-scheduled'];
+  for (const [k, v] of Object.entries(vars)) args.push('--var', `${k}:${v}`);
+  const child = spawn(process.execPath, args, {
+    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, // own process group, so stopping it also stops workerd
+    env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1', NO_COLOR: '1', WRANGLER_LOG_PATH: path.join(dir, 'logs') },
   });
   let log = '';
-  child.stderr.on('data', (d) => { log += d; });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`server did not start: ${log}`)), 10000);
-    child.stdout.on('data', (d) => { log += d; if (log.includes('is running')) { clearTimeout(timer); resolve(); } });
-    child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`server exited (${code}): ${log}`)); });
+    const timer = setTimeout(() => reject(new Error(`worker did not start: ${log}`)), 60000);
+    const onData = (d) => { log += d; if (log.includes('Ready on')) { clearTimeout(timer); resolve(); } };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`worker exited (${code}): ${log}`)); });
   });
   const base = `http://127.0.0.1:${port}`;
   const call = async (method, p, body, headers = {}) => {
@@ -38,17 +49,10 @@ export async function startServer(env = {}) {
     try { json = JSON.parse(text); } catch {}
     return { status: res.status, json, text, headers: res.headers };
   };
-  const stop = () => { child.removeAllListeners('exit'); child.kill(); fs.rmSync(dir, { recursive: true, force: true }); };
-  return { base, call, stop, dir };
-}
-
-/** Raw GET with an arbitrary Host header (fetch won't let you set one). */
-export function rawGet(base, pathname, host) {
-  const { port } = new URL(base);
-  return new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path: pathname, headers: { host } }, (res) => {
-      res.resume();
-      res.on('end', () => resolve(res.statusCode));
-    }).on('error', reject);
-  });
+  const stop = () => {
+    child.removeAllListeners('exit');
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+    setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 500).unref();
+  };
+  return { base, call, stop, dir, port };
 }

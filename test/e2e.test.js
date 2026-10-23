@@ -238,7 +238,7 @@ const FAKE_NETFLIX = `<!doctype html><title>Viewing activity</title>
 </script>`;
 
 test('phone flow: save the bookmark, run it on Netflix, land back with history stored on the phone', { skip }, async () => {
-  const hosted = await startServer({ HOSTED: '1' });
+  const hosted = await startServer();
   const { ctx, p } = await newPhone();
   try {
     await p.goto(hosted.base);

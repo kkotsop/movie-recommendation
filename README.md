@@ -21,50 +21,59 @@ Other controls:
 - **Include movies & series I've already watched**: a switch in Discovery settings (the sliders icon). When it's on, rewatches come back about **3× less often** than new titles and carry a "↻ Rewatch" chip.
 - **Show me**: Movies / Series / Both, a minimum IMDb rating, and your Netflix country.
 
-## Quick start (try it on your computer)
+## Run it on your computer
 
 ```bash
 git clone https://github.com/kkotsop/movie-recommendation.git
 cd movie-recommendation
 npm install
-npm start            # → http://localhost:4173
+npm start            # → http://localhost:8787  (the real Cloudflare Worker runtime, running locally)
 ```
 
-Requires Node 20+. It works straight away with a built-in sample of 100 Netflix originals that have real IMDb ratings. For **everything on Netflix in your country, with real posters and what's trending**, the owner (you, once) adds a free TMDB key:
+Requires Node 20+. It works straight away with a built-in sample of 100 Netflix originals that have real IMDb ratings. For **everything on Netflix in your country, with real posters and what's trending**, the owner (you, once) adds a free TMDB key. Put it in a file called `.dev.vars` (git-ignored) next to `wrangler.jsonc`:
+
+```
+TMDB_API_KEY=your-key
+```
+
+Get the key at <https://www.themoviedb.org/settings/api>. **Players never need a TMDB account or key**: only the person who deploys it sets one, and the app has no field for it. The first build of a country's catalog takes a minute or two and runs in the background; until it's ready everyone swipes the sample.
+
+## Deploy it on Cloudflare
+
+SwipeFlick is a PWA: open it in a phone browser and **Add to Home Screen** for a full-screen app with its own icon. Phones only install PWAs over **HTTPS**, which Cloudflare gives you for free.
+
+**You need the Workers Paid plan ($5/month).** The free plan allows only 10 ms of CPU per request and 50 outbound requests, which is too little for scoring a catalog or building one.
 
 ```bash
-TMDB_API_KEY=your-key npm start
+npx wrangler login
+npx wrangler r2 bucket create swipeflick-cache     # shared Netflix catalog, one file per country
+npx wrangler secret put TMDB_API_KEY               # paste the owner's key; it is never sent to browsers
+npm run deploy
 ```
 
-Get the key at <https://www.themoviedb.org/settings/api>. **Players never need a TMDB account or key**: only the person running the server sets it, and the app has no field for it. The first catalog build takes about a minute per country; it's cached for a week and refreshed automatically (trending daily).
+Wrangler prints your URL (`https://swipeflick.<your-subdomain>.workers.dev`). Open it on your phone and add it to the home screen. For your own domain, add a custom domain to the Worker in the Cloudflare dashboard (*Workers & Pages → swipeflick → Settings → Domains & Routes*).
 
-| Environment variable | What it does |
+What gets created and what each piece does (all declared in `wrangler.jsonc`):
+
+| Piece | What it's for |
 |---|---|
-| `TMDB_API_KEY` | The owner's TMDB key. Never sent to the browser. |
-| `DEFAULT_REGION` | Netflix country used until someone picks theirs (default `US`). |
-| `HOSTED=1` | Answer to any hostname (set this when it's on the internet). The Dockerfile sets it. |
-| `ALLOWED_HOSTS` | Optional comma-separated hostnames to accept, e.g. `swipeflick.example.com`. |
-| `PORT`, `HOST` | Where to listen (default `127.0.0.1:4173`). |
-| `SWIPEFLICK_DATA` | Folder for the shared catalog cache (default `./data`). Put it on a persistent volume when hosting. |
+| Static assets (`public/`) | The app itself. Free and unlimited; only `/api/*` runs code. |
+| R2 bucket `swipeflick-cache` | The Netflix catalog and trending list for each country. |
+| Durable Object `Shared` | Shared TMDB lookups, build status, rate limits and transfer codes. **Never anyone's history or swipes.** |
+| Workflow `BuildCatalog` | Builds a country's catalog in the background (~1,000 TMDB lookups) the first time someone picks that country. |
+| Cron (every 6 h) | Refreshes trending daily and rebuilds any catalog older than a week. |
 
-## Put it on the internet (so people can install it on their phones)
+Settings: `DEFAULT_REGION` in `wrangler.jsonc` is the Netflix country used until someone picks theirs (default `US`).
 
-SwipeFlick is a PWA: open it in a phone browser and **Add to Home Screen** for a full-screen app with its own icon. Phones only install and cache PWAs over **HTTPS**, so run it somewhere that gives you a certificate. The included `Dockerfile` is all a container host (Fly.io, Render, Railway, ...) needs:
-
-```bash
-docker build -t swipeflick .
-docker run -p 8080:8080 -v swipeflick-data:/data -e TMDB_API_KEY=your-key swipeflick
-```
-
-Keep `/data` on a persistent volume so the catalog survives restarts. Anyone with the link can use it. Cloudflare isn't required; it's only useful in front of the host for DNS, HTTPS and a custom domain.
+**Protect your TMDB quota.** Anyone with the link can use the app, and the first visitor in a new country triggers a catalog build. The expensive endpoints are rate limited per client, but add a Cloudflare rate-limiting rule on `/api/*` as well (*Security → WAF → Rate limiting rules*; roughly 100 requests per minute per IP is plenty for real use).
 
 ### Where each person's data lives
 
-Each installed app keeps **its own** Netflix history, swipes and settings in the phone's browser storage. Every request sends what the server needs to work out recommendations, and the server forgets it as soon as it answers (the API tests check that nothing personal reaches disk). Consequences worth knowing:
+Each installed app keeps **its own** Netflix history, swipes and settings in the phone's browser storage. Every request sends what the server needs to work out recommendations, and the server forgets it as soon as it answers (the tests check that nothing personal reaches the Worker's storage). Consequences worth knowing:
 
-- Clearing site data or switching phones loses it. Use **Profile → Move your data** to get a one-time code (valid once, for 10 minutes; held in memory only) and enter it on the other device.
+- Clearing site data or switching phones loses it. Use **Profile → Move your data** to get a one-time code (valid once, for 10 minutes) and enter it on the other device.
 - **iPhone keeps the home-screen app and Safari separate.** The Netflix bookmark runs in Safari, so after syncing, use *Move your data* to carry the history into the home-screen app.
-- Titles someone watched are looked up on TMDB once and the answer is shared, so the first person pays for the lookup and everyone after gets it free. The shared cache holds titles, not who watched them.
+- Titles someone watched are looked up on TMDB once and the answer is shared, so the first person pays for the lookup and everyone after gets it free. The shared table holds titles, not who watched them.
 
 ## Getting your Netflix history in
 
@@ -127,28 +136,28 @@ SwipeFlick does the same, but for titles, in `src/recommender.js`:
 ## Project layout
 
 ```
-server.js              stateless HTTP server + JSON API (keeps nothing about a person)
+worker/index.js        the API (a Cloudflare Worker) and scheduled job
+worker/shared.js       Durable Object: shared lookups, build status, rate limits, transfer codes
+worker/build.js        Workflow that builds one country's catalog in the background
 src/history.js         Netflix CSV parsing, date-format detection, episode → show grouping
-src/recommender.js     taste vectors, scoring, deck sampling, feeling lucky
-src/catalog.js         TMDB catalog build + history matching, demo catalog
+src/recommender.js     taste vectors, scoring, deck sampling, daily picks, feeling lucky
+src/catalog.js         TMDB catalog + history matching, trending (storage-free, runs anywhere)
 src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
-src/imdb.js            IMDb ratings dataset download + lookup
-src/store.js           shared on-disk cache in ./data (catalog, TMDB lookups, ratings)
+src/imdb.js            IMDb ratings dataset, streamed and filtered
+src/demo.js            the built-in 100-title sample
 public/                the Tinder-style UI (vanilla HTML/CSS/JS, no build step)
-public/sw.js           service worker (offline shell, cached posters)
 public/device-store.js    your history, swipes and settings, kept on the device
 public/netflix-export.js  the "Sync from Netflix" bookmark
+public/sw.js           service worker (offline shell, cached posters)
 scripts/make-icons.js  renders the PNG app icons from public/icon.svg
-Dockerfile             always-on container for the phone setup
-test/                  unit, API, hosted-mode and browser end-to-end tests
+wrangler.jsonc         Cloudflare configuration
+test/                  unit, API, TMDB-flow and browser end-to-end tests
 ```
-
-`./data/` (git-ignored) holds only shared caches: the Netflix catalog, TMDB lookups and IMDb ratings. Personal data never lands there.
 
 ```bash
-npm test      # unit + API + hosted-mode + a phone-sized browser end-to-end run
+npm test      # runs the real Worker locally; no Cloudflare account or TMDB key needed
 ```
 
-The end-to-end tests drive Chrome, Edge or Playwright's Chromium and skip themselves if none is installed. CI (`.github/workflows/test.yml`) runs everything on Node 20 and 24.
+The tests start the actual Worker in Wrangler's local runtime (with its own R2 and Durable Object storage) and a fake TMDB/IMDb server, so they cover the background catalog build, shared lookups, ratings, trending and the privacy guarantees. The browser tests drive Chrome, Edge or Playwright's Chromium and skip themselves if none is installed. CI (`.github/workflows/test.yml`) runs everything on Node 20 and 24.
 
 Not affiliated with Netflix, IMDb, TMDB or Tinder.

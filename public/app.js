@@ -829,10 +829,12 @@ async function matchHistory(groups) {
   renderJobs();
   try {
     for (let i = 0; i < todo.length; i += batch) {
-      await api.ask('/api/history/resolve', { history: { groups: todo.slice(i, i + batch) } });
+      const { ids } = await api.ask('/api/history/resolve', { history: { groups: todo.slice(i, i + batch) } });
+      ids.forEach((id, j) => { todo[i + j].titleId = id; }); // remembered on this device, so the server never repeats the lookup
       S.importJob = { state: 'running', message: `Matching your viewing history… ${Math.min(todo.length, i + batch)} of ${todo.length}`, progress: (i + batch) / todo.length };
       renderJobs();
     }
+    device.save();
     S.importJob = { state: 'done', message: `Imported ${device.data().history.entries.toLocaleString()} views across ${groups.length} titles.` };
     await refreshState();
     refill(true);

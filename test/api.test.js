@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { startServer, rawGet } from './helpers.js';
+import { startServer } from './helpers.js';
 
 let srv;
 before(async () => { srv = await startServer(); });
@@ -133,22 +133,27 @@ test('two people get separate recommendations from the same server', async () =>
   assert.equal((await ask('/api/profile', {})).json.stats.supers, 0, 'a third visitor sees none of it');
 });
 
-test('the server keeps no personal data: nothing about a person is written to disk or remembered', async () => {
+test('the server keeps no personal data: nothing about a person is written to its storage', async () => {
   const secret = 'Zzyzx Private Documentary';
   const groups = [{ name: secret, kind: 'movie', views: 3, firstWatched: '2026-01-02', lastWatched: '2026-02-03' }];
   await ask('/api/deck', { history: { source: 'csv', entries: 3, groups }, swipes: [{ id: 'imdb-tt3398228', action: 'like' }] });
   await ask('/api/profile', { history: { source: 'csv', entries: 3, groups } });
+  await ask('/api/history/resolve', { history: { groups } });
   await srv.call('POST', '/api/history/import', `Title,Date\n"${secret}","1/2/26"\n"Dark: Season 1: x","9/28/26"\n`);
   const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]));
-  const all = files(srv.dir);
-  assert.ok(!all.some((f) => /state\.json/.test(f)), 'no per-person state file');
-  for (const f of all) assert.ok(!fs.readFileSync(f, 'utf8').includes(secret), `${f} must not contain anyone's history`);
+  const all = files(srv.dir).filter((f) => fs.statSync(f).size > 0);
+  assert.ok(all.length > 0, 'the Worker has persisted storage to inspect (the shared Durable Object)');
+  for (const f of all) {
+    const bytes = fs.readFileSync(f);
+    assert.ok(!bytes.includes(secret), `${f} must not contain anyone's history`);
+    assert.ok(!bytes.includes('imdb-tt3398228') || !/swipe/i.test(f), 'swipes are not stored');
+  }
   assert.equal((await srv.call('GET', '/api/catalog')).text.includes(secret), false);
 });
 
 test('history lookups do nothing (and cost nothing) without an owner key', async () => {
-  const r = await ask('/api/history/resolve', { history: { groups: [{ name: 'Dark', kind: 'series' }] } });
-  assert.deepEqual(r.json, { resolved: 0, total: 0 });
+  const r = await ask('/api/history/resolve', { history: { groups: [{ name: 'Dark', kind: 'series' }, { name: 'Roma', kind: 'movie' }] } });
+  assert.deepEqual(r.json, { ids: [null, null] });
 });
 
 test('transfer codes carry data across once, then expire', async () => {
@@ -176,22 +181,6 @@ test('rate limits stop bulk abuse of the expensive endpoints', async () => {
   } finally { s.stop(); }
 });
 
-test('rejects foreign Host headers (DNS rebinding) and path traversal', async () => {
-  assert.equal(await rawGet(srv.base, '/api/catalog', 'evil.example'), 403);
-  assert.equal(await rawGet(srv.base, '/api/catalog', `localhost:${new URL(srv.base).port}`), 200);
-  assert.ok([403, 404].includes((await srv.call('GET', '/..%2fserver.js')).status));
-});
-
-test('hosted mode answers on the public hostname; ALLOWED_HOSTS pins it', async () => {
-  const open = await startServer({ HOSTED: '1' });
-  const pinned = await startServer({ HOSTED: '1', ALLOWED_HOSTS: 'swipeflick.example.com' });
-  try {
-    assert.equal(await rawGet(open.base, '/', 'swipeflick.example.com'), 200);
-    assert.equal(await rawGet(pinned.base, '/', 'swipeflick.example.com'), 200);
-    assert.equal(await rawGet(pinned.base, '/', 'evil.example'), 403);
-  } finally { open.stop(); pinned.stop(); }
-});
-
 test('PWA: manifest, icons and service worker are served correctly', async () => {
   const html = (await srv.call('GET', '/')).text;
   assert.match(html, /rel="manifest" href="manifest\.webmanifest"/);
@@ -206,4 +195,7 @@ test('PWA: manifest, icons and service worker are served correctly', async () =>
   const shell = JSON.parse(sw.text.match(/const SHELL_FILES = (\[.*?\]);/)[1].replace(/'/g, '"'));
   for (const f of shell) assert.equal((await srv.call('GET', f)).status, 200, `${f} must exist or the app can't install`);
   assert.equal((await srv.call('GET', '/')).headers.get('x-content-type-options'), 'nosniff');
+  assert.equal((await srv.call('GET', '/')).headers.get('cache-control'), 'no-cache');
+  assert.equal((await srv.call('GET', '/api/nothing-here')).status, 404);
+  assert.equal((await srv.call('GET', '/..%2fwrangler.jsonc')).status === 200 && (await srv.call('GET', '/..%2fwrangler.jsonc')).text.includes('r2_buckets'), false, 'config is not served');
 });

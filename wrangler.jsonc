@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "swipeflick",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+
+  // The app itself (public/) is served by Cloudflare for free; only /api/* runs our code.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The shared Netflix catalog for each country.
+  "r2_buckets": [{ "binding": "CACHE", "bucket_name": "swipeflick-cache" }],
+
+  // Shared lookups, build status, rate limits and transfer codes. Never anyone's history or swipes.
+  "durable_objects": { "bindings": [{ "name": "SHARED", "class_name": "Shared" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Shared"] }],
+
+  // Builds a country's catalog in the background the first time someone asks for it.
+  "workflows": [{ "name": "swipeflick-build-catalog", "binding": "BUILD", "class_name": "BuildCatalog" }],
+
+  // Every 6 hours: refresh trending daily, rebuild any catalog older than a week.
+  "triggers": { "crons": ["0 */6 * * *"] },
+
+  "vars": { "DEFAULT_REGION": "US" },
+  "limits": { "cpu_ms": 30000 },
+  "observability": { "enabled": true }
+
+  // Secret (never in this file):  npx wrangler secret put TMDB_API_KEY
+}

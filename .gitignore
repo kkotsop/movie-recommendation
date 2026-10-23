@@ -3,3 +3,5 @@ data/*
 !data/demo-catalog.json
 .env
 .playwright-mcp/
+.dev.vars
+.wrangler/

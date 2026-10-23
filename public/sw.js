@@ -2,7 +2,7 @@
 //  - app shell: cached on install, refreshed in the background on every visit
 //  - posters (TMDB images): cached the first time they are seen
 //  - /api: never cached (it carries personal data), so recommendations need a connection
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SHELL = `swipeflick-shell-${VERSION}`;
 const IMAGES = `swipeflick-images-${VERSION}`;
 const MAX_IMAGES = 300;

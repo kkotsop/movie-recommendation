@@ -5,10 +5,10 @@
 export const NETFLIX_PROVIDER_ID = 8;
 const IMG = 'https://image.tmdb.org/t/p/';
 
-export function createTmdb(key, fetchImpl = fetch) {
+export function createTmdb(key, fetchImpl = fetch, base = 'https://api.themoviedb.org/3') {
   const bearer = key.length > 40;
   async function get(path, params = {}) {
-    const url = new URL(`https://api.themoviedb.org/3${path}`);
+    const url = new URL(`${base}${path}`);
     for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
     if (!bearer) url.searchParams.set('api_key', key);
     for (let attempt = 0; ; attempt++) {
