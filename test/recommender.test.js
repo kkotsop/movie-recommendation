@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildProfile, nextDeck, feelingLucky, scoreTitle, candidates, dailyPicks, explain, seededRng } from '../src/recommender.js';
+import { buildProfile, nextDeck, feelingLucky, scoreTitle, candidates, dailyPicks, explain, seededRng } from '../public/lib/recommender.js';
 
 const T = (id, genres, keywords, extra = {}) => ({ id, title: id, type: 'movie', year: 2020, genres, keywords, imdbRating: 7.5, imdbVotes: 100000, ...extra });
 

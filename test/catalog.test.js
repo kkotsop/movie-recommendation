@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
 import { discoverRefs, fetchTitles, applyRatings, resolveHistory, resolveByTitle, MIN_NETFLIX_TITLES } from '../src/catalog.js';
-import { loadDemoCatalog } from '../src/demo.js';
+import fs from 'node:fs';
+import { demoCatalog } from '../public/lib/engine.js';
 import { imdbRatings } from '../src/imdb.js';
 import { createTmdb, mapDetails } from '../src/tmdb.js';
+
+const loadDemoCatalog = () => demoCatalog(JSON.parse(fs.readFileSync(new URL('../public/demo-catalog.json', import.meta.url), 'utf8'))).titles;
 
 const movie = { id: 1, title: 'Roma', original_title: 'Roma', release_date: '2018-11-21', runtime: 135, genres: [{ name: 'Drama' }], keywords: { keywords: [{ name: 'maid' }] }, credits: { cast: [{ name: 'Yalitza Aparicio' }], crew: [{ job: 'Director', name: 'Alfonso Cuarón' }] }, imdb_id: 'tt6155172', original_language: 'es', poster_path: '/p.jpg', vote_average: 7.7 };
 const show = { id: 2, name: 'Dark', original_name: 'Dark', first_air_date: '2017-12-01', last_air_date: '2020-06-27', status: 'Ended', number_of_seasons: 3, genres: [{ name: 'Mystery' }], keywords: { results: [{ name: 'time travel' }] }, aggregate_credits: { cast: [{ name: 'Louis Hofmann' }] }, created_by: [{ name: 'Baran bo Odar' }], external_ids: { imdb_id: 'tt5753856' }, original_language: 'de', vote_average: 8.4 };

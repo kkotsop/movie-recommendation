@@ -1,27 +1,13 @@
 // Builds the swipeable catalog: what's on Netflix in a region (via TMDB) plus IMDb ratings.
 // Everything here is storage-free so it runs in a Cloudflare Worker, a Workflow, or a Node test.
 import { fetchDetails, mapLimit, NETFLIX_PROVIDER_ID } from './tmdb.js';
-import { normalizeTitle } from './history.js';
+import { normalizeTitle } from '../public/lib/history.js';
 
-export const netflixUrl = (title) => `https://www.netflix.com/search?q=${encodeURIComponent(title)}`;
+export { netflixUrl, resolveByTitle } from '../public/lib/match.js';
+import { netflixUrl } from '../public/lib/match.js';
 
 /** A real catalog needs at least this many Netflix titles; fewer means TMDB has nothing for that country. */
 export const MIN_NETFLIX_TITLES = 20;
-
-/** Matches history groups to catalog titles by (alternative) title. */
-export function resolveByTitle(groups, titles) {
-  const index = new Map();
-  for (const t of titles) {
-    for (const name of [t.title, ...(t.aka || [])]) {
-      const key = normalizeTitle(name);
-      if (!index.has(key)) index.set(key, t);
-    }
-  }
-  return groups.map((g) => {
-    const t = index.get(normalizeTitle(g.name));
-    return { ...g, titleId: t && (g.kind !== 'series' || t.type === 'series') ? t.id : null };
-  });
-}
 
 function bestMatch(results, name) {
   const want = normalizeTitle(name);

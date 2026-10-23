@@ -1,6 +1,6 @@
 node_modules/
-data/*
-!data/demo-catalog.json
+data-out/
+data/
 .env
 .playwright-mcp/
 .dev.vars

@@ -24,7 +24,8 @@ export async function startServer(vars = {}) {
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-worker-'));
   const args = [WRANGLER, 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', dir, '--inspector-port', '0', '--test-scheduled'];
-  for (const [k, v] of Object.entries(vars)) args.push('--var', `${k}:${v}`);
+  // Tests never touch the real internet: with no catalog source given, every country's catalog is simply "not built".
+  for (const [k, v] of Object.entries({ CATALOG_BASE: 'http://127.0.0.1:9/none', ...vars })) args.push('--var', `${k}:${v}`);
   const child = spawn(process.execPath, args, {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, // own process group, so stopping it also stops workerd
     env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1', NO_COLOR: '1', WRANGLER_LOG_PATH: path.join(dir, 'logs') },

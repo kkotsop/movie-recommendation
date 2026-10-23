@@ -1,6 +1,9 @@
 // SwipeFlick client: Tinder's card stack, gestures and screens for movies & series.
 import { bookmarkletFor } from './netflix-export.js';
 import * as device from './device-store.js';
+import * as engine from './lib/engine.js';
+import { REGIONS } from './lib/regions.js';
+import { parseViewingHistoryCsv, groupHistory } from './lib/history.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -17,10 +20,7 @@ const api = {
     return data;
   },
   get: (p) => api.req('GET', p),
-  /** POST. Without `raw`, `body` is JSON. */
-  post: (p, b = {}, raw) => api.req('POST', p, b, raw),
-  /** POST this device's data (history, swipes, settings) so the server can answer; the server keeps none of it. */
-  ask: (p, extra) => api.req('POST', p, device.requestBody(extra)),
+  post: (p, b = {}) => api.req('POST', p, b),
 };
 
 const S = {
@@ -31,11 +31,37 @@ const S = {
   likesFilter: 'all',
   likes: [],
   daily: [],
-  polling: null,
-  importJob: null, // {state, message, progress}: matching your history on first import
+  catalog: null, // the country's catalog (or the built-in sample), held in memory and scored on this phone
+  importJob: null, // {state, message}: recognising your watched titles after an import
   detailFor: null, // {card, from: 'deck'|'likes'}
   swipeCount: 0,
 };
+
+// ---------------------------------------------------------------- the catalog (scored on this phone)
+
+let demoRaw;
+/** The country's catalog if it has been built, otherwise the built-in sample. Cached by the service worker. */
+async function loadCatalog() {
+  const region = device.data().settings.region;
+  try {
+    const res = await fetch(`/api/catalog/${region}`);
+    if (res.ok) {
+      const file = await res.json();
+      S.catalog = engine.makeCatalog('tmdb', file.titles, file.builtAt);
+      return S.catalog;
+    }
+  } catch { /* offline, or not built yet: use the sample */ }
+  try {
+    demoRaw ||= await (await fetch('/demo-catalog.json')).json();
+    S.catalog = engine.demoCatalog(demoRaw);
+  } catch {
+    S.catalog = engine.makeCatalog('demo', []);
+    toast("Couldn't load titles. Check your connection.");
+  }
+  return S.catalog;
+}
+
+const data = () => device.data();
 
 // ---------------------------------------------------------------- formatting
 
@@ -179,24 +205,15 @@ function layoutDeck() {
 
 function updateEmptyState() {
   const radar = $('#radar');
-  const job = S.state?.jobs.catalog;
-  const building = job?.state === 'running' && !S.queue.length;
   const empty = !S.queue.length;
   radar.hidden = !empty;
   $('#actions').style.visibility = empty ? 'hidden' : '';
   if (radar.hidden) return;
   radar.classList.toggle('still', false);
-  const progress = $('#radar-progress');
-  progress.hidden = !building;
-  if (building) {
-    $('#radar-text').textContent = job.message || 'Building your catalog…';
-    progress.firstElementChild.style.width = `${Math.round((job.progress || 0) * 100)}%`;
-    radar.style.background = '';
-  } else {
-    radar.style.background = '';
-    $('#radar-text').textContent = S.refilling ? 'Finding titles for you…' : "You've seen everything that matches your settings. Try loosening your filters — or let luck decide.";
-  }
-  $('#radar-actions').hidden = S.refilling || building;
+  radar.style.background = '';
+  $('#radar-progress').hidden = true;
+  $('#radar-text').textContent = S.refilling ? 'Finding titles for you…' : "You've seen everything that matches your settings. Try loosening your filters — or let luck decide.";
+  $('#radar-actions').hidden = S.refilling;
 }
 
 async function refill(reset = false) {
@@ -209,7 +226,7 @@ async function refill(reset = false) {
   updateEmptyState();
   try {
     const exclude = [...S.queue.map((c) => c.id), ...S.swipedThisSession];
-    const { cards } = await api.ask('/api/deck', { n: 10, exclude });
+    const cards = engine.deck(S.catalog, data(), { n: 10, exclude });
     const have = new Set(S.queue.map((c) => c.id));
     S.queue.push(...cards.filter((c) => !have.has(c.id)));
   } catch (err) {
@@ -402,7 +419,7 @@ async function rewind() {
     const last = device.popSwipe();
     if (!last) return toast('Nothing to rewind');
     const { action } = last;
-    const [card] = (await api.ask('/api/cards', { ids: [last.id] })).cards;
+    const [card] = engine.cards(S.catalog, data(), [last.id]);
     if (!card) return;
     S.swipedThisSession.delete(card.id);
     S.queue = [card, ...S.queue.filter((c) => c.id !== card.id)];
@@ -431,7 +448,8 @@ async function feelingLucky(exclude = []) {
   btn.classList.add('lit', 'pressed');
   setTimeout(() => btn.classList.remove('lit', 'pressed'), 250);
   try {
-    const { card } = await api.ask('/api/lucky', { exclude });
+    const card = engine.lucky(S.catalog, data(), { exclude });
+    if (!card) return toast('You have swiped through everything that matches your settings.');
     showPick(card, exclude);
   } catch (err) {
     toast(err.message);
@@ -550,13 +568,6 @@ document.addEventListener('click', (e) => {
 
 // ---------------------------------------------------------------- discovery settings
 
-const REGIONS = {
-  US: 'United States', GB: 'United Kingdom', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', GR: 'Greece', CY: 'Cyprus',
-  DE: 'Germany', AT: 'Austria', CH: 'Switzerland', FR: 'France', BE: 'Belgium', NL: 'Netherlands', ES: 'Spain', PT: 'Portugal', IT: 'Italy',
-  SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland', CZ: 'Czechia', HU: 'Hungary', RO: 'Romania', TR: 'Türkiye',
-  IL: 'Israel', IN: 'India', JP: 'Japan', KR: 'South Korea', SG: 'Singapore', PH: 'Philippines', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina',
-  CO: 'Colombia', CL: 'Chile', ZA: 'South Africa',
-};
 $('#region').innerHTML = Object.entries(REGIONS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
 
 function renderFilters() {
@@ -568,7 +579,7 @@ function renderFilters() {
   $('#region').value = s.region;
   $('#region-note').textContent = S.state.catalog.source === 'tmdb'
     ? 'Only titles streaming on Netflix in this country are shown.'
-    : 'The full Netflix catalog for this country is loading. Until then you can swipe a built-in sample.';
+    : "This country's full Netflix catalog isn't available yet, so you're swiping a built-in sample.";
 }
 
 async function saveSettings(patch, reloadDeck = true) {
@@ -577,9 +588,9 @@ async function saveSettings(patch, reloadDeck = true) {
     const regionChanged = patch.region && patch.region !== d.settings.region;
     Object.assign(d.settings, patch);
     device.save();
+    if (regionChanged) await loadCatalog();
     await refreshState();
     if (reloadDeck) refill(true);
-    if (regionChanged) startPolling();
   } catch (err) {
     toast(err.message);
   }
@@ -622,7 +633,7 @@ async function resetAll() {
 
 async function loadLikes() {
   try {
-    S.likes = (await api.ask('/api/likes')).likes;
+    S.likes = engine.likes(S.catalog, data());
   } catch (err) {
     toast(err.message);
   }
@@ -659,7 +670,8 @@ const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${Str
 
 async function loadDaily() {
   try {
-    const { cards, date } = await api.ask('/api/daily', { date: localDate() });
+    const date = localDate();
+    const cards = engine.daily(S.catalog, data(), date);
     S.daily = cards;
     $('#daily-date').textContent = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
   } catch (err) {
@@ -730,7 +742,7 @@ function renderProfile() {
 
   $('#catalog-info').textContent = st.catalog.source === 'tmdb'
     ? `Netflix ${REGIONS[st.settings.region] || st.settings.region}: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
-    : `Showing a sample of ${st.catalog.count} Netflix originals. The full Netflix catalog for your country is on its way.`;
+    : `Showing a sample of ${st.catalog.count} Netflix originals. The full catalog for ${REGIONS[st.settings.region] || 'your country'} isn't available yet.`;
   $('#storage-note').textContent = device.isPersistent()
     ? 'Your history and swipes are saved on this device only. We keep none of it on our servers.'
     : "This browser isn't saving data (private window?). Your swipes will be lost when you close it.";
@@ -752,13 +764,6 @@ function renderJobs() {
       el.className = `sync-status ${nf.cls}`;
       el.innerHTML = nf.html;
     }
-  }
-  const cat = S.state.catalog.source === 'tmdb' && !jobRunning(S.state.jobs.catalog) && S.state.jobs.catalog.state !== 'error' ? null : statusHtml(S.state.jobs.catalog);
-  const el = $('#catalog-status');
-  el.hidden = !cat;
-  if (cat) {
-    el.className = `sync-status ${cat.cls}`;
-    el.innerHTML = cat.html;
   }
 }
 
@@ -790,6 +795,7 @@ $('#transfer-claim').addEventListener('click', async () => {
     device.replaceAll(JSON.parse(payload));
     closeSheets();
     S.swipedThisSession.clear();
+    await loadCatalog();
     await refreshState();
     refill(true);
     toast('Your data is here');
@@ -806,41 +812,46 @@ function connectNetflix() {
   openSyncSheet();
 }
 
-/** Takes the Netflix viewing list (CSV text), keeps it on this device, then matches titles in the background. */
+/** Takes the Netflix viewing list (CSV text), reads it here on the phone, and keeps it on this device. */
 async function importHistory(csv, source) {
-  const res = await api.post('/api/history/import', csv, true);
+  const entries = parseViewingHistoryCsv(csv);
+  if (!entries.length) throw new Error("That file doesn't look like a Netflix viewing history CSV.");
+  const groups = groupHistory(entries).slice(0, 3000);
   const d = device.data();
-  d.history = { source, importedAt: new Date().toISOString(), entries: res.entries, groups: res.groups };
+  d.history = { source, importedAt: new Date().toISOString(), entries: entries.length, groups, titles: {} };
   d.onboarded = true;
   device.save();
   hideWelcome();
   await refreshState();
   refill(true);
-  matchHistory(res.groups);
-  return res;
+  recogniseHistory();
+  return { entries: entries.length, groups };
 }
 
-/** The first people to watch a title pay for its TMDB lookup; after that it is shared. Runs in batches so progress shows. */
-async function matchHistory(groups) {
-  if (S.state?.catalog.source !== 'tmdb') return;
-  const batch = 40;
-  const todo = groups.slice(0, 300);
-  S.importJob = { state: 'running', message: 'Matching your viewing history…', progress: 0 };
+/**
+ * Titles the catalog doesn't have (watched long ago, or no longer on Netflix, or named in another language) are
+ * looked up by name on TMDB, a few at a time. Only the names go to our server: no dates, no swipes. Best effort.
+ */
+async function recogniseHistory() {
+  const todo = engine.unmatchedGroups(S.catalog, data()).slice(0, 300);
+  if (!todo.length) return;
+  const batch = 8;
+  S.importJob = { state: 'running', message: 'Recognising your watched titles…' };
   renderJobs();
   try {
     for (let i = 0; i < todo.length; i += batch) {
-      const { ids } = await api.ask('/api/history/resolve', { history: { groups: todo.slice(i, i + batch) } });
-      ids.forEach((id, j) => { todo[i + j].titleId = id; }); // remembered on this device, so the server never repeats the lookup
-      S.importJob = { state: 'running', message: `Matching your viewing history… ${Math.min(todo.length, i + batch)} of ${todo.length}`, progress: (i + batch) / todo.length };
+      const part = todo.slice(i, i + batch);
+      const { ids, titles } = await api.post('/api/history/resolve', { groups: part.map(({ name, kind }) => ({ name, kind })) });
+      ids.forEach((id, j) => { part[j].titleId = id; });
+      Object.assign(device.data().history.titles, titles); // kept on this device, so nobody asks twice
+      S.importJob = { state: 'running', message: `Recognising your watched titles… ${Math.min(todo.length, i + batch)} of ${todo.length}` };
       renderJobs();
     }
-    device.save();
-    S.importJob = { state: 'done', message: `Imported ${device.data().history.entries.toLocaleString()} views across ${groups.length} titles.` };
-    await refreshState();
-    refill(true);
-  } catch (err) {
-    S.importJob = { state: 'error', message: err.message };
-  }
+  } catch { /* not configured, or busy: matching by name still works */ }
+  device.save();
+  S.importJob = { state: 'done', message: `Imported ${device.data().history.entries.toLocaleString()} views across ${device.data().history.groups.length} titles.` };
+  await refreshState();
+  refill(true);
   renderJobs();
 }
 
@@ -932,48 +943,19 @@ $('#welcome-skip').addEventListener('click', async () => {
 
 async function refreshState() {
   const d = device.data();
-  const p = await api.ask('/api/profile');
+  const p = engine.profile(S.catalog, d);
   S.state = {
-    settings: { ...d.settings, hasTmdbKey: p.catalog.source === 'tmdb' },
+    settings: { ...d.settings },
     onboarded: d.onboarded,
     catalog: p.catalog,
     history: p.history,
     stats: p.stats,
     taste: p.taste,
-    jobs: { catalog: p.job },
   };
   updateBadge();
   renderFilters();
   renderProfile();
   return S.state;
-}
-
-function jobRunning(j) {
-  return j?.state === 'running';
-}
-
-/** While the shared catalog for your country is being built, check on it until it is ready. */
-function startPolling() {
-  if (S.polling) return;
-  S.polling = setInterval(async () => {
-    const c = await api.get(`/api/catalog?region=${device.data().settings.region}`).catch(() => null);
-    if (!c) return;
-    const was = S.state.jobs.catalog;
-    S.state.jobs.catalog = c.job;
-    if (jobRunning(was) && !jobRunning(c.job) || (c.source === 'tmdb' && S.state.catalog.source !== 'tmdb')) {
-      if (c.job.state === 'done') toast(`🍿 ${c.job.message}`);
-      await refreshState();
-      refill(true);
-      const groups = device.data().history?.groups;
-      if (groups?.length && c.source === 'tmdb') matchHistory(groups);
-    }
-    renderJobs();
-    updateEmptyState();
-    if (!jobRunning(c.job)) {
-      clearInterval(S.polling);
-      S.polling = null;
-    }
-  }, 1500);
 }
 
 // ---------------------------------------------------------------- tabs, toast, keys
@@ -1056,11 +1038,11 @@ async function init() {
   const d = device.data();
   if (!d.settings.region) {
     const guess = (navigator.language || '').split('-')[1]?.toUpperCase();
-    const { defaultRegion } = await api.get('/api/catalog').catch(() => ({ defaultRegion: 'US' }));
-    d.settings.region = guess && REGIONS[guess] ? guess : defaultRegion;
+    d.settings.region = guess && REGIONS[guess] ? guess : 'US';
     device.save();
   }
   try { navigator.storage?.persist?.(); } catch {} // ask the browser not to clear our data when space is low
+  await loadCatalog();
   const st = await refreshState();
   if (!st.onboarded) showWelcome();
   if (!device.isPersistent()) toast("This browser isn't saving data, so your swipes won't be kept.");
@@ -1072,7 +1054,7 @@ async function init() {
     $('#coach').hidden = false;
     setTimeout(hideCoach, 9000);
   }
-  if (jobRunning(st.jobs.catalog)) startPolling();
+  if (d.history && engine.unmatchedGroups(S.catalog, d).length) recogniseHistory();
 }
 
 init();

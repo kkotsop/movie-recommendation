@@ -11,22 +11,17 @@
     "run_worker_first": ["/api/*"]
   },
 
-  // The shared Netflix catalog for each country.
-  "r2_buckets": [{ "binding": "CACHE", "bucket_name": "swipeflick-cache" }],
-
-  // Shared lookups, build status, rate limits and transfer codes. Never anyone's history or swipes.
+  // Shared TMDB lookups, rate limits and device-transfer codes. Never anyone's history or swipes.
   "durable_objects": { "bindings": [{ "name": "SHARED", "class_name": "Shared" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Shared"] }],
 
-  // Builds a country's catalog in the background the first time someone asks for it.
-  "workflows": [{ "name": "swipeflick-build-catalog", "binding": "BUILD", "class_name": "BuildCatalog" }],
+  "vars": {
+    // Where the scheduled GitHub job publishes the country catalogs (the `data` branch of your repo).
+    "CATALOG_BASE": "https://raw.githubusercontent.com/kkotsop/movie-recommendation/data/catalog"
+  },
 
-  // Every 6 hours: refresh trending daily, rebuild any catalog older than a week.
-  "triggers": { "crons": ["0 */6 * * *"] },
-
-  "vars": { "DEFAULT_REGION": "US" },
-  "limits": { "cpu_ms": 30000 },
   "observability": { "enabled": true }
 
-  // Secret (never in this file):  npx wrangler secret put TMDB_API_KEY
+  // Optional secret, for recognising watched titles the catalog doesn't have (never in this file):
+  //   npx wrangler secret put TMDB_API_KEY
 }

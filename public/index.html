@@ -31,7 +31,7 @@
           <summary>How does syncing work?</summary>
           <p>You save a bookmark once. When you tap it on netflix.com, it reads your <b>Viewing activity</b> in your own signed-in browser and brings the list back here. It stays on this phone.</p>
         </details>
-        <p class="privacy-note" id="welcome-privacy"><b>Your Netflix password is never asked for, seen or stored by SwipeFlick.</b> You sign in on netflix.com itself. Only the titles and dates from your viewing activity are saved, and they stay on this phone. “Reset everything” in Profile deletes them.</p>
+        <p class="privacy-note" id="welcome-privacy"><b>Your Netflix password is never asked for, seen or stored by SwipeFlick.</b> You sign in on netflix.com itself. Your viewing activity is read and kept on this phone only: it is never sent to us. “Reset everything” in Profile deletes it.</p>
         <p class="welcome-fine">By swiping you agree to find something great to watch tonight.</p>
       </div>
     </section>
@@ -119,7 +119,6 @@
         <div class="panel">
           <h2>Catalog</h2>
           <p class="muted" id="catalog-info"></p>
-          <div class="sync-status" id="catalog-status" hidden></div>
         </div>
 
         <div class="panel">
@@ -205,7 +204,7 @@
           <h3>Ratings</h3>
           <p>IMDb ratings come from IMDb's <a href="https://developer.imdb.com/non-commercial-datasets/" target="_blank" rel="noopener">non-commercial datasets</a>, for personal use.</p>
           <h3>Your data</h3>
-          <p>SwipeFlick never asks for, sees or stores your Netflix email or password. Only the titles and dates from your viewing activity, plus your swipes, are saved, and they stay on your own device. Our server works out recommendations and forgets them. “Reset everything” in Profile deletes them.</p>
+          <p>SwipeFlick never asks for, sees or stores your Netflix email or password. Your viewing activity and swipes are saved on your own device and recommendations are worked out there too, so none of it is sent to us. The one exception: names of watched titles we don't recognise are looked up on TMDB through our server (names only, no dates and nothing that identifies you). “Reset everything” in Profile deletes your data.</p>
           <p class="muted">SwipeFlick is not affiliated with Netflix, IMDb or TMDB.</p>
         </div>
       </div>
@@ -226,7 +225,7 @@
           <a class="pill pill-outline pill-sm" id="sync-open" href="https://www.netflix.com/viewingactivity" target="_blank" rel="noopener">Open viewing activity</a>
         </div>
         <textarea class="sync-code" id="sync-code" readonly rows="3" aria-label="Bookmark address"></textarea>
-        <p class="privacy-note privacy-note-sheet"><b>We don't store your Netflix login.</b> The bookmark runs inside your own browser, where you are already signed in to Netflix. It reads only your viewing list (titles and dates) and hands it to SwipeFlick, which keeps it on this phone. Your email and password never leave netflix.com, and the app can't see them. “Reset everything” in Profile deletes the list.</p>
+        <p class="privacy-note privacy-note-sheet"><b>We don't store your Netflix login.</b> The bookmark runs inside your own browser, where you are already signed in to Netflix. It reads only your viewing list (titles and dates) and hands it to SwipeFlick, which keeps it on this phone and never sends it anywhere. Your email and password never leave netflix.com, and the app can't see them. “Reset everything” in Profile deletes the list.</p>
       </div>
     </div>
 

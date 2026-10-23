@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, parseViewingHistoryCsv, seriesNameFromTitle, groupHistory, normalizeTitle } from '../src/history.js';
+import { parseCsv, parseViewingHistoryCsv, seriesNameFromTitle, groupHistory, normalizeTitle } from '../public/lib/history.js';
 
 test('parseCsv handles quotes, commas and CRLF', () => {
   const rows = parseCsv('﻿Title,Date\r\n"Love, Death & Robots: Volume 1: ""Sonnie\'s Edge""",3/15/19\r\n');

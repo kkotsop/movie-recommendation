@@ -8,7 +8,8 @@
     "start": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test",
-    "icons": "node scripts/make-icons.js"
+    "icons": "node scripts/make-icons.js",
+    "catalogs": "node scripts/build-catalogs.js"
   },
   "engines": {
     "node": ">=20"

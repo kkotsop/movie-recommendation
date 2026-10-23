@@ -1,6 +1,5 @@
 // Everything personal lives here, on this device: your Netflix history, swipes and settings.
-// The server never keeps it. It is sent along with a request only so the server can work out
-// recommendations, and is forgotten as soon as the answer is sent back.
+// Recommendations are worked out on this device too, so none of it is ever sent anywhere.
 const KEY = 'swipeflick.v1';
 
 const blank = () => ({
@@ -8,7 +7,7 @@ const blank = () => ({
   onboarded: false,
   settings: { includeWatched: false, types: 'both', minRating: 0, region: null },
   swipes: [], // [{id, action: 'like'|'super'|'nope', at}]
-  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched, titleId}]}
+  history: null, // {source, importedAt, entries, groups: [{name, kind, views, firstWatched, lastWatched, titleId}], titles: {id: compact title}}
 });
 
 let mem = null;
@@ -87,20 +86,4 @@ export function counts() {
   const s = data().swipes;
   const n = (a) => s.filter((x) => x.action === a).length;
   return { likes: n('like'), supers: n('super'), nopes: n('nope') };
-}
-
-/** What the server needs to answer one request. It is not kept on the server. */
-export function requestBody(extra = {}) {
-  const d = data();
-  const { includeWatched, types, minRating, region } = d.settings;
-  return {
-    region,
-    settings: { includeWatched, types, minRating },
-    swipes: d.swipes.map(({ id, action, at }) => ({ id, action, at })),
-    history: d.history && {
-      source: d.history.source, importedAt: d.history.importedAt, entries: d.history.entries,
-      groups: d.history.groups.map(({ name, kind, views, firstWatched, lastWatched, titleId }) => ({ name, kind, views, firstWatched, lastWatched, titleId })),
-    },
-    ...extra,
-  };
 }

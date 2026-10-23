@@ -1,0 +1,48 @@
+# Builds the Netflix catalog for every country (free: this runs on GitHub, not on Cloudflare) and publishes
+# the files to the `data` branch, where the app's Worker picks them up. Needs one repository secret:
+#   TMDB_API_KEY   (Settings -> Secrets and variables -> Actions -> New repository secret)
+name: catalogs
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # every day; titles seen before are reused, so most days are quick
+  workflow_dispatch: {}    # or run it by hand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalogs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Start from the previous catalogs so unchanged titles don't need to be fetched again.
+      - name: Get the previous catalogs
+        run: |
+          git clone --depth 1 --branch data "https://github.com/${GITHUB_REPOSITORY}.git" data-out || mkdir data-out
+          rm -rf data-out/.git
+
+      - name: Build the catalogs
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: node scripts/build-catalogs.js
+
+      # One fresh commit each time, force-pushed, so the branch never grows.
+      - name: Publish to the data branch
+        run: |
+          cd data-out
+          git init -q -b data
+          git config user.name "swipeflick catalogs"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Catalogs $(date -u +%F)"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" data
