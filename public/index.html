@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1014">
+  <title>SwipeFlick</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app" id="app">
+
+    <!-- Welcome / login (Tinder's gradient sign-in screen) -->
+    <section class="welcome" id="welcome" hidden>
+      <div class="welcome-inner">
+        <div class="welcome-logo"><svg class="logo-mark" viewBox="0 0 24 24"><use href="#i-spark"/></svg><span>swipeflick</span></div>
+        <p class="welcome-tagline">Swipe right on your next binge.</p>
+        <div class="welcome-actions">
+          <button class="pill pill-white" id="welcome-netflix">Log in with Netflix</button>
+          <label class="pill pill-outline" for="csv-input">Upload viewing history (CSV)</label>
+          <button class="link" id="welcome-skip">Skip — just start swiping</button>
+        </div>
+        <div class="sync-status" id="welcome-status" hidden></div>
+        <details class="welcome-help">
+          <summary>How does “Log in with Netflix” work?</summary>
+          <p>A normal browser window opens on netflix.com. You sign in and pick your profile there — SwipeFlick never sees your password. It then reads your <b>Viewing activity</b> page and closes the window. Everything stays on this computer.</p>
+          <p>Prefer not to? On netflix.com go to <b>Account → Profiles → (your profile) → Viewing activity → Download all</b>, then upload the <code>NetflixViewingHistory.csv</code> file here.</p>
+        </details>
+        <p class="welcome-fine">By swiping you agree to find something great to watch tonight.</p>
+      </div>
+    </section>
+
+    <header class="topbar">
+      <button class="icon-btn" id="btn-reset" aria-label="Reset swipes" title="Reset swipes"><svg viewBox="0 0 24 24"><use href="#i-reset"/></svg></button>
+      <div class="logo"><svg class="logo-mark" viewBox="0 0 24 24"><use href="#i-spark"/></svg><span>swipeflick</span></div>
+      <button class="icon-btn" id="btn-filters" aria-label="Discovery settings" title="Discovery settings"><svg viewBox="0 0 24 24"><use href="#i-sliders"/></svg></button>
+    </header>
+
+    <main class="views">
+      <!-- Discover -->
+      <section class="view view-discover" id="view-discover">
+        <div class="deck-wrap">
+          <div class="deck" id="deck" aria-live="polite"></div>
+          <div class="radar" id="radar" hidden>
+            <div class="radar-pulse"></div><div class="radar-pulse"></div><div class="radar-pulse"></div>
+            <div class="radar-avatar"><svg viewBox="0 0 24 24"><use href="#i-spark"/></svg></div>
+            <p class="radar-text" id="radar-text">Finding titles for you…</p>
+            <div class="radar-progress" id="radar-progress" hidden><span></span></div>
+            <div class="radar-actions" id="radar-actions" hidden>
+              <button class="pill pill-brand" data-action="lucky">I'm feeling lucky</button>
+              <button class="pill pill-outline" data-action="filters">Discovery settings</button>
+            </div>
+          </div>
+        </div>
+        <div class="actions" id="actions">
+          <button class="act act-sm act-rewind" data-action="rewind" aria-label="Rewind" title="Rewind (Backspace)"><svg viewBox="0 0 24 24"><use href="#i-rewind"/></svg></button>
+          <button class="act act-lg act-nope" data-action="nope" aria-label="Nope" title="Nope (←)"><svg viewBox="0 0 24 24"><use href="#i-nope"/></svg></button>
+          <button class="act act-sm act-super" data-action="super" aria-label="Must watch" title="Must watch (Enter)"><svg viewBox="0 0 24 24"><use href="#i-star"/></svg></button>
+          <button class="act act-lg act-like" data-action="like" aria-label="Like" title="Like (→)"><svg viewBox="0 0 24 24"><use href="#i-heart"/></svg></button>
+          <button class="act act-sm act-lucky" data-action="lucky" aria-label="I'm feeling lucky" title="I'm feeling lucky (L)"><svg viewBox="0 0 24 24"><use href="#i-lucky"/></svg></button>
+          <div class="coach" id="coach" hidden>✨ <b>I'm feeling lucky</b> — one great pick, right now</div>
+        </div>
+        <div class="keys" aria-hidden="true">
+          <span><kbd>←</kbd> Nope</span><span><kbd>→</kbd> Like</span><span><kbd>↵</kbd> Must watch</span>
+          <span><kbd>↑</kbd> Open info</span><span><kbd>↓</kbd> Close info</span><span><kbd>Space</kbd> Next page</span>
+          <span><kbd>⌫</kbd> Rewind</span><span><kbd>L</kbd> Feeling lucky</span>
+        </div>
+      </section>
+
+      <!-- Likes -->
+      <section class="view view-likes" id="view-likes" hidden>
+        <div class="view-head">
+          <h1>Likes</h1>
+          <div class="seg" id="likes-filter" role="tablist">
+            <button class="on" data-filter="all" role="tab">All</button>
+            <button data-filter="super" role="tab">Must watch</button>
+          </div>
+        </div>
+        <div class="likes-grid" id="likes-grid"></div>
+      </section>
+
+      <!-- Profile -->
+      <section class="view view-profile" id="view-profile" hidden>
+        <div class="profile-hero">
+          <div class="avatar-ring" id="avatar-ring"><div class="avatar">🍿</div></div>
+          <h1>Your taste</h1>
+          <p class="muted" id="profile-sub"></p>
+          <div class="hero-actions">
+            <button class="hero-btn" data-action="filters"><span><svg viewBox="0 0 24 24"><use href="#i-sliders"/></svg></span>Settings</button>
+            <button class="hero-btn hero-btn-main" id="profile-sync"><span><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>Sync Netflix</button>
+            <label class="hero-btn" for="csv-input"><span><svg viewBox="0 0 24 24"><use href="#i-upload"/></svg></span>Upload CSV</label>
+          </div>
+          <div class="sync-status" id="profile-status" hidden></div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="panel">
+          <h2>What you're into</h2>
+          <div id="taste"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Netflix history</h2>
+          <div id="history"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Catalog</h2>
+          <p class="muted" id="catalog-info"></p>
+          <label class="field">
+            <span>TMDB API key <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">get one free</a></span>
+            <input type="password" id="tmdb-key" placeholder="Paste your TMDB API key or read access token" autocomplete="off">
+          </label>
+          <div class="row-btns">
+            <button class="pill pill-brand pill-sm" id="tmdb-save">Save key</button>
+            <button class="pill pill-outline pill-sm" id="catalog-refresh">Refresh catalog</button>
+          </div>
+          <div class="sync-status" id="catalog-status" hidden></div>
+        </div>
+
+        <div class="panel panel-danger">
+          <button class="danger-row" id="reset-swipes">Reset all swipes</button>
+          <button class="danger-row" id="reset-all">Reset everything &amp; log out of Netflix</button>
+        </div>
+        <p class="footnote">Ratings from IMDb non-commercial datasets. Catalog data from TMDB. Not affiliated with Netflix, IMDb or Tinder.</p>
+      </section>
+    </main>
+
+    <nav class="tabbar" id="tabbar">
+      <button class="tab on" data-tab="discover" aria-label="Discover"><svg viewBox="0 0 24 24"><use href="#i-spark"/></svg></button>
+      <button class="tab" data-tab="likes" aria-label="Likes"><svg viewBox="0 0 24 24"><use href="#i-likes"/></svg><span class="badge" id="likes-badge" hidden></span></button>
+      <button class="tab" data-tab="profile" aria-label="Profile"><svg viewBox="0 0 24 24"><use href="#i-user"/></svg></button>
+    </nav>
+
+    <!-- Discovery settings sheet -->
+    <div class="sheet" id="sheet-filters" role="dialog" aria-modal="true" aria-labelledby="filters-title" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <div class="sheet-body">
+        <div class="sheet-head"><span></span><h2 id="filters-title">Discovery settings</h2><button class="link link-brand" data-close>Done</button></div>
+        <div class="group-label">Show me</div>
+        <div class="group">
+          <div class="seg seg-full" id="types">
+            <button data-types="movie">Movies</button>
+            <button data-types="series">Series</button>
+            <button data-types="both">Both</button>
+          </div>
+        </div>
+        <div class="group">
+          <label class="switch-row">
+            <span><b>Include movies &amp; series I've already watched</b><small>Rewatches show up less often than new titles.</small></span>
+            <input type="checkbox" role="switch" id="include-watched">
+          </label>
+        </div>
+        <div class="group-label">Minimum IMDb rating <span id="min-rating-val"></span></div>
+        <div class="group"><input type="range" id="min-rating" min="0" max="9" step="0.5" class="range"></div>
+        <div class="group-label">Netflix country</div>
+        <div class="group">
+          <select id="region" class="select"></select>
+          <small class="muted" id="region-note"></small>
+        </div>
+        <div class="group">
+          <button class="danger-row" data-action="reset">Reset swipes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expanded card / title details -->
+    <div class="sheet sheet-full" id="sheet-detail" role="dialog" aria-modal="true" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <div class="sheet-body detail" id="detail"></div>
+    </div>
+
+    <!-- "It's a Match!" -> "It's a Pick!" -->
+    <div class="match" id="match" hidden>
+      <div class="match-inner" id="match-inner"></div>
+    </div>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="drop-hint" id="drop-hint" hidden>Drop your NetflixViewingHistory.csv</div>
+    <input type="file" id="csv-input" accept=".csv,text/csv" hidden>
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="g-brand" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#14d9c4"/><stop offset="1" stop-color="#6c5cff"/></linearGradient>
+    </defs>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path style="fill: var(--spark-fill, currentColor)" d="M12.6 1.8c.4 3 3 4.9 4.6 7.2 1.4 2 2 3.9 1.6 6.1-.6 3.5-3.6 6.4-7 6.4-3.8 0-6.8-3-6.8-6.8 0-2.6 1.3-4.5 3-6 .1 1.7.8 3 2.1 3.6-.6-3.6.7-7.3 2.5-10.5z"/><path style="fill: var(--spark-play, #0e1014)" d="M10.4 12.6v6.2l5-3.1z"/></symbol>
+    <symbol id="i-nope" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.2 0 3.6 1.2 5.2 3 1.6-1.8 3-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4L2.8 9.5l6.4-.8z"/></symbol>
+    <symbol id="i-rewind" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.5v5.5H9"/><path d="M4.2 14.5A8 8 0 1 0 6 7.2L3.5 10"/></g></symbol>
+    <symbol id="i-lucky" viewBox="0 0 24 24"><path fill="currentColor" d="M11 1.5l2.1 6.6 6.4 2.4-6.4 2.4L11 19.5l-2.1-6.6-6.4-2.4 6.4-2.4zM18.5 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></g></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20.5V16h-4.5"/></g></symbol>
+    <symbol id="i-likes" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2.2"/><path fill="currentColor" d="M12 17s-4.2-2.6-5.3-5.1C6 10 7.1 8 9.2 8c1.2 0 2 .7 2.8 1.6.8-.9 1.6-1.6 2.8-1.6 2.1 0 3.2 2 2.5 3.9C16.2 14.4 12 17 12 17z"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path fill="currentColor" d="M3.5 21c.6-4.3 4-7 8.5-7s7.9 2.7 8.5 7z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4.5v15l12-7.5z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3"/></g></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
