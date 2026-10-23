@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { zipDirectory } from './zip.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -18,8 +17,6 @@ for (const f of ['engine.js', 'history.js', 'recommender.js']) {
 }
 fs.mkdirSync(path.join(dist, 'data'), { recursive: true });
 fs.copyFileSync(path.join(root, 'data', 'demo-catalog.json'), path.join(dist, 'data', 'demo-catalog.json'));
-
-fs.writeFileSync(path.join(dist, 'swipeflick-extension.zip'), zipDirectory(path.join(root, 'extension'), 'swipeflick-extension'));
 
 fs.writeFileSync(path.join(dist, '_headers'), `/*
   X-Content-Type-Options: nosniff

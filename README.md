@@ -48,7 +48,7 @@ npm run deploy      # builds, then runs `wrangler deploy` (first time: it opens 
 ```
 
 The hosted version differs from the local app in three ways, all because it has no server:
-- no **Log in with Netflix** window. Use the browser extension or upload the CSV instead; either way the data goes into your browser's storage only and is never uploaded anywhere.
+- no **Log in with Netflix** window. Use the bookmark or upload the CSV instead; either way the data goes into your browser's storage only and is never uploaded anywhere.
 - it swipes through the built-in catalog of 100 Netflix originals, without the TMDB key or country picker.
 - swipes and history are saved in the visitor's own browser (`localStorage`), so everyone gets their own private profile. "Reset everything" deletes it.
 
@@ -56,11 +56,11 @@ The hosted version differs from the local app in three ways, all because it has 
 
 Netflix has no public API or "sign in with Netflix" for third-party apps, so there are three ways:
 
-1. **Browser extension (works with the hosted site too).** `extension/` is a small Chrome/Edge extension. Install it once (the app's **Connect Netflix** button walks you through it: download `swipeflick-extension.zip`, then `chrome://extensions` → Developer mode → Load unpacked), paste your SwipeFlick address into its popup and press **Sync my Netflix**. It opens `netflix.com/viewingactivity` in a background tab using **your own login**, expands the list, reads the rows, closes the tab, and hands the data to your SwipeFlick tab. It only runs when you click it, and it only has access to netflix.com plus the SwipeFlick address you allow. If Netflix asks you to log in or pick a profile, do that in the tab it opens and press Sync again. It reads whichever profile is active in your browser.
+1. **Sync Netflix bookmark (works with the hosted site too, nothing to install).** In the app, tap **Connect Netflix** and drag the **⚡ Sync Netflix** button onto your bookmarks bar, once. Then open netflix.com/viewingactivity (logged in as the profile you want) and click the bookmark. It reads the list on the page you're looking at (a minute for long histories) and opens SwipeFlick with your history loaded. The bookmark is generated for the address you opened the app from, so there's nothing to paste. Needs a desktop browser and pop-ups allowed.
 2. **Log in with Netflix (local app only).** SwipeFlick opens its own Chrome/Edge window on netflix.com. **You** log in and pick a profile there; the app never sees your password.
 3. **Upload the CSV.** On netflix.com: *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv`.
 
-> The extension and option 2 read the Viewing activity page's HTML, so a Netflix redesign can break them. The CSV upload keeps working. Netflix's terms don't allow automated access to their site, so use these at your own discretion; everything stays on your computer.
+> The bookmark and option 2 read the Viewing activity page's HTML, so a Netflix redesign can break them. The CSV upload keeps working. Netflix's terms don't allow automated access to their site, so use these at your own discretion; everything stays on your computer.
 
 The parser handles US and European date formats and groups episodes into shows ("Dark: Season 2: …" becomes *Dark*). It recognises season markers in English, Greek, German, French, Spanish, Italian and other languages.
 
@@ -122,8 +122,7 @@ src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
 src/engine.js          the API as pure functions, shared by the server and the browser build
 src/imdb.js            IMDb ratings dataset download + lookup
 src/netflix.js         "Log in with Netflix" browser flow (Playwright)
-extension/             Chrome/Edge extension that sends your Viewing activity to the app
-scripts/zip.mjs        tiny zip writer for the extension download
+public/bookmarklet.js  the "Sync Netflix" bookmark (runs on netflix.com, posts the history to the app tab)
 src/store.js           JSON state in ./data (swipes, settings, imported history)
 public/                the Tinder-style UI (vanilla HTML/CSS/JS); local-api.js is the in-browser backend
 scripts/build-static.mjs  builds dist/ for static hosting; wrangler.jsonc = Cloudflare config

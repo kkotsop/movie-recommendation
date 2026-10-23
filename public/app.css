@@ -327,8 +327,7 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 /* connect-Netflix sheet */
 .ext-intro { margin: 4px 4px 14px; }
 .steps { margin: 0; padding: 0 4px 0 24px; display: flex; flex-direction: column; gap: 16px; line-height: 1.5; }
-.steps code, .copy-row code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; font-size: 13px; word-break: break-all; }
 .steps .pill { display: inline-flex; margin-left: 6px; height: 32px; vertical-align: middle; }
-.copy-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.copy-row code { flex: 1; padding: 8px 10px; }
-.copy-row .pill { flex: none; }
+.steps kbd { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font: 12px system-ui; box-shadow: 0 2px 0 #000; }
+.bm { display: inline-block; margin-top: 10px; padding: 12px 20px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; cursor: grab; box-shadow: 0 4px 14px rgba(0, 0, 0, .4); }
+.bm:active { cursor: grabbing; }

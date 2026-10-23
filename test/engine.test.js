@@ -93,7 +93,7 @@ test('lucky respects excludes and reset clears swipes (or everything)', () => {
   assert.equal(all.onboarded, false);
 });
 
-test('extension rows import like a CSV, rejecting empty or malformed payloads', () => {
+test('bookmark rows import like a CSV, rejecting empty or malformed payloads', () => {
   const { r } = setup();
   assert.equal(r['POST /api/history/entries'](q(), { rows: [] })[0], 400);
   assert.equal(r['POST /api/history/entries'](q(), {})[0], 400);
@@ -105,6 +105,6 @@ test('extension rows import like a CSV, rejecting empty or malformed payloads', 
   ] });
   assert.deepEqual([res.entries, res.titles], [3, 2]);
   const st = r['GET /api/state'](q());
-  assert.equal(st.history.source, 'extension');
+  assert.equal(st.history.source, 'bookmark');
   assert.equal(st.history.recent[0].lastWatched, '2026-10-21', 'day-first dates detected');
 });

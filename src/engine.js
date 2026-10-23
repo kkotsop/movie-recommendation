@@ -148,13 +148,13 @@ export function createEngine(host) {
       return { ok: true, entries: h.entries, titles: h.groups.length };
     },
 
-    // From the browser extension: [{title, date}] with the date as Netflix wrote it.
+    // From the Sync Netflix bookmark: [{title, date}] with the date as Netflix wrote it.
     'POST /api/history/entries': (q, { rows } = {}) => {
       const entries = Array.isArray(rows)
         ? entriesFromRows(rows.slice(0, 200000).filter((r) => r && typeof r.title === 'string').map((r) => ({ title: r.title, date: typeof r.date === 'string' ? r.date : '' })))
         : [];
       if (!entries.length) return [400, { error: 'No viewing activity was found.' }];
-      const h = importHistory(entries, 'extension');
+      const h = importHistory(entries, 'bookmark');
       return { ok: true, entries: h.entries, titles: h.groups.length };
     },
 

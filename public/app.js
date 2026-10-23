@@ -680,7 +680,7 @@ function renderProfile() {
 
   const h = st.history;
   $('#history').innerHTML = h
-    ? `<p class="muted">${h.source === 'netflix' ? 'Synced from Netflix' : 'Imported from CSV'} ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} matched to the catalog</p>
+    ? `<p class="muted">${h.source === 'csv' ? 'Imported from CSV' : 'Synced from Netflix'} ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} matched to the catalog</p>
        ${h.recent.map((r) => `<div class="hist-row"><span class="${r.matched ? '' : 'unmatched'}">${esc(r.name)}</span><small>${r.kind === 'series' ? `${r.views} ep · ` : ''}${r.lastWatched || ''}</small></div>`).join('')}`
     : '<p class="muted">No history yet. Tap <b>Sync Netflix</b> to log in, or upload the CSV from netflix.com → Account → Viewing activity → Download all.</p>';
 
@@ -778,15 +778,18 @@ window.addEventListener('drop', (e) => {
   uploadCsv(e.dataTransfer.files[0]);
 });
 
-// ---------------------------------------------------------------- browser extension hand-off
+// ---------------------------------------------------------------- Netflix bookmark hand-off
 
-let extensionImporting = false;
+let historyImporting = false;
+let lastNonce = null;
+// The "Sync Netflix" bookmark runs on netflix.com and posts the history to this tab.
 window.addEventListener('message', async (e) => {
   const d = e.data;
-  if (e.source !== window || e.origin !== location.origin || d?.source !== 'swipeflick-extension' || d.type !== 'history') return;
-  if (extensionImporting) return; // the extension retries until we answer
-  extensionImporting = true;
-  const ack = (body) => window.postMessage({ source: 'swipeflick-app', type: 'history-ack', ...body }, location.origin);
+  if (d?.source !== 'swipeflick-bookmarklet' || d.type !== 'history' || e.origin !== 'https://www.netflix.com') return;
+  if (historyImporting || d.nonce === lastNonce) return; // the bookmark retries until we answer
+  historyImporting = true;
+  lastNonce = d.nonce;
+  const ack = (body) => e.source?.postMessage({ source: 'swipeflick-app', type: 'history-ack', ...body }, e.origin);
   try {
     const res = typeof d.csv === 'string' ? await api.post('/api/history/csv', d.csv, true) : await api.post('/api/history/entries', { rows: d.rows });
     ack({ ok: true, entries: res.entries, titles: res.titles });
@@ -797,23 +800,21 @@ window.addEventListener('message', async (e) => {
     refill(true);
     startPolling();
   } catch (err) {
+    lastNonce = null;
     ack({ ok: false, error: err.message });
   } finally {
-    extensionImporting = false;
+    historyImporting = false;
   }
 });
 
-function openExtensionGuide() {
-  $('#ext-address').textContent = location.origin;
-  openSheet('#sheet-extension');
+async function openConnectGuide() {
+  const { bookmarkletHref } = await import('./bookmarklet.js');
+  $('#bm-link').href = bookmarkletHref(location.origin);
+  openSheet('#sheet-connect');
 }
-$('#ext-copy').addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(location.origin);
-    toast('Address copied');
-  } catch {
-    toast('Select the address and copy it');
-  }
+$('#bm-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  toast('Drag this button up to your bookmarks bar — don’t click it here');
 });
 
 // ---------------------------------------------------------------- welcome
@@ -911,7 +912,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'rewind') rewind();
   else if (a === 'lucky') feelingLucky();
   else if (a === 'filters') openSheet('#sheet-filters');
-  else if (a === 'extension') openExtensionGuide();
+  else if (a === 'connect') openConnectGuide();
   else if (a === 'reset') resetSwipes();
 });
 $('#btn-filters').addEventListener('click', () => openSheet('#sheet-filters'));
