@@ -1,0 +1,6 @@
+{
+  // Static site (Workers static assets): the UI + the in-browser recommender.
+  "name": "swipeflick",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./dist" }
+}

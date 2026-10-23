@@ -3,7 +3,7 @@
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 
-const api = {
+const httpApi = {
   async req(method, path, body, raw = false) {
     const res = await fetch(path, {
       method,
@@ -14,9 +14,19 @@ const api = {
     if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
     return data;
   },
-  get: (p) => api.req('GET', p),
-  post: (p, b = {}, raw) => api.req('POST', p, b, raw),
+  get: (p) => httpApi.req('GET', p),
+  post: (p, b = {}, raw) => httpApi.req('POST', p, b, raw),
 };
+
+/** The local Node server if there is one; otherwise the in-browser engine (static hosting). */
+async function pickApi() {
+  try {
+    const res = await fetch('/api/state');
+    if ((res.headers.get('content-type') || '').includes('json') && res.ok) return httpApi;
+  } catch {}
+  return (await import('./local-api.js')).createLocalApi();
+}
+const api = await pickApi();
 
 const S = {
   state: null,
@@ -897,10 +907,25 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------------------------------------------------------------- capabilities
+
+/** Hide what this deployment can't do (no Netflix login / TMDB when statically hosted). */
+function applyCapabilities() {
+  const caps = S.state.capabilities || {};
+  $$('[data-needs]').forEach((el) => (el.hidden = !caps[el.dataset.needs]));
+  $$('[data-hosted]').forEach((el) => (el.hidden = Boolean(caps.netflixLogin)));
+  if (!caps.netflixLogin) {
+    const up = $('#welcome .pill-outline');
+    up.classList.replace('pill-outline', 'pill-white');
+    $('#reset-all').textContent = 'Reset everything & delete my data';
+  }
+}
+
 // ---------------------------------------------------------------- boot
 
 (async function init() {
   const st = await refreshState();
+  applyCapabilities();
   S.lastJobs = structuredClone(st.jobs);
   if (!st.onboarded) {
     showWelcome();

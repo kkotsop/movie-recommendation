@@ -17,15 +17,16 @@
         <div class="welcome-logo"><svg class="logo-mark" viewBox="0 0 24 24"><use href="#i-spark"/></svg><span>swipeflick</span></div>
         <p class="welcome-tagline">Swipe right on your next binge.</p>
         <div class="welcome-actions">
-          <button class="pill pill-white" id="welcome-netflix">Log in with Netflix</button>
+          <button class="pill pill-white" id="welcome-netflix" data-needs="netflixLogin">Log in with Netflix</button>
           <label class="pill pill-outline" for="csv-input">Upload viewing history (CSV)</label>
           <button class="link" id="welcome-skip">Skip — just start swiping</button>
         </div>
         <div class="sync-status" id="welcome-status" hidden></div>
         <details class="welcome-help">
-          <summary>How does “Log in with Netflix” work?</summary>
-          <p>A normal browser window opens on netflix.com. You sign in and pick your profile there — SwipeFlick never sees your password. It then reads your <b>Viewing activity</b> page and closes the window. Everything stays on this computer.</p>
-          <p>Prefer not to? On netflix.com go to <b>Account → Profiles → (your profile) → Viewing activity → Download all</b>, then upload the <code>NetflixViewingHistory.csv</code> file here.</p>
+          <summary>Where do I get my Netflix history?</summary>
+          <p data-needs="netflixLogin">A normal browser window opens on netflix.com. You sign in and pick your profile there — SwipeFlick never sees your password. It then reads your <b>Viewing activity</b> page and closes the window. Everything stays on this computer.</p>
+          <p>On netflix.com go to <b>Account → Profiles → (your profile) → Viewing activity → Download all</b>, then upload the <code>NetflixViewingHistory.csv</code> file here.</p>
+          <p data-hosted>🔒 Your file is read inside this browser and saved only in this browser's storage. It is never uploaded anywhere.</p>
         </details>
         <p class="welcome-fine">By swiping you agree to find something great to watch tonight.</p>
       </div>
@@ -88,7 +89,7 @@
           <p class="muted" id="profile-sub"></p>
           <div class="hero-actions">
             <button class="hero-btn" data-action="filters"><span><svg viewBox="0 0 24 24"><use href="#i-sliders"/></svg></span>Settings</button>
-            <button class="hero-btn hero-btn-main" id="profile-sync"><span><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>Sync Netflix</button>
+            <button class="hero-btn hero-btn-main" id="profile-sync" data-needs="netflixLogin"><span><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>Sync Netflix</button>
             <label class="hero-btn" for="csv-input"><span><svg viewBox="0 0 24 24"><use href="#i-upload"/></svg></span>Upload CSV</label>
           </div>
           <div class="sync-status" id="profile-status" hidden></div>
@@ -106,7 +107,7 @@
           <div id="history"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel" data-needs="tmdb">
           <h2>Catalog</h2>
           <p class="muted" id="catalog-info"></p>
           <label class="field">
@@ -124,7 +125,7 @@
           <button class="danger-row" id="reset-swipes">Reset all swipes</button>
           <button class="danger-row" id="reset-all">Reset everything &amp; log out of Netflix</button>
         </div>
-        <p class="footnote">Ratings from IMDb non-commercial datasets. Catalog data from TMDB. Not affiliated with Netflix, IMDb or Tinder.</p>
+        <p class="footnote">Ratings from IMDb non-commercial datasets.<span data-needs="tmdb"> Catalog data from TMDB.</span> Not affiliated with Netflix, IMDb or Tinder.</p>
       </section>
     </main>
 
@@ -155,8 +156,8 @@
         </div>
         <div class="group-label">Minimum IMDb rating <span id="min-rating-val"></span></div>
         <div class="group"><input type="range" id="min-rating" min="0" max="9" step="0.5" class="range"></div>
-        <div class="group-label">Netflix country</div>
-        <div class="group">
+        <div class="group-label" data-needs="tmdb">Netflix country</div>
+        <div class="group" data-needs="tmdb">
           <select id="region" class="select"></select>
           <small class="muted" id="region-note"></small>
         </div>

@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { createTmdb, fetchDetails, mapLimit, NETFLIX_PROVIDER_ID } from './tmdb.js';
 import { imdbRatings } from './imdb.js';
-import { normalizeTitle } from './history.js';
+import { normalizeTitle, resolveByTitle } from './history.js';
 import { readCache, writeCache } from './store.js';
 
 const MAX_AGE = 7 * 86400000;
@@ -16,20 +16,7 @@ export function loadDemoCatalog() {
   return raw.titles.map((t) => ({ ...t, netflixUrl: netflixUrl(t.title) }));
 }
 
-/** Matches history groups to catalog titles by (alternative) title. */
-export function resolveByTitle(groups, titles) {
-  const index = new Map();
-  for (const t of titles) {
-    for (const name of [t.title, ...(t.aka || [])]) {
-      const key = normalizeTitle(name);
-      if (!index.has(key)) index.set(key, t);
-    }
-  }
-  return groups.map((g) => {
-    const t = index.get(normalizeTitle(g.name));
-    return { ...g, titleId: t && (g.kind !== 'series' || t.type === 'series') ? t.id : null };
-  });
-}
+export { resolveByTitle };
 
 function bestMatch(results, name) {
   const want = normalizeTitle(name);

@@ -320,3 +320,6 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .like-card .pg-emoji { font-size: 40px; margin-bottom: 6px; }
 .like-card .pg-title { font-size: 20px; letter-spacing: -.5px; }
 .like-card .pg-type { display: none; }
+
+/* scrolling views: children must not shrink into each other */
+.view-likes > *, .view-profile > * { flex: none; }

@@ -39,6 +39,19 @@ It works straight away with a built-in catalog of 100 Netflix originals that hav
 
 You can also set it before starting: `TMDB_API_KEY=xxxx npm start`.
 
+## Hosting it online (Cloudflare)
+
+`npm run build:static` builds `dist/`: the same UI plus the recommender running **inside the visitor's browser**. It needs no server, so it hosts as a plain static site on Cloudflare (Workers static assets, see `wrangler.jsonc`).
+
+```bash
+npm run deploy      # builds, then runs `wrangler deploy` (first time: it opens a browser to log in to Cloudflare)
+```
+
+The hosted version differs from the local app in three ways, all because it has no server:
+- no **Log in with Netflix**: upload the viewing-history CSV instead. The file is parsed in the browser and never leaves it.
+- it swipes through the built-in catalog of 100 Netflix originals, without the TMDB key or country picker.
+- swipes and history are saved in the visitor's own browser (`localStorage`), so everyone gets their own private profile. "Reset everything" deletes it.
+
 ## Getting your Netflix history in
 
 Netflix has no public API, so there are two ways:
@@ -103,10 +116,12 @@ src/history.js         Netflix CSV parsing, date-format detection, episode → s
 src/recommender.js     taste vectors, scoring, deck sampling, feeling lucky
 src/catalog.js         TMDB catalog build + history matching, demo catalog
 src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
+src/engine.js          the API as pure functions, shared by the server and the browser build
 src/imdb.js            IMDb ratings dataset download + lookup
 src/netflix.js         "Log in with Netflix" browser flow (Playwright)
 src/store.js           JSON state in ./data (swipes, settings, imported history)
-public/                the Tinder-style UI (vanilla HTML/CSS/JS, no build step)
+public/                the Tinder-style UI (vanilla HTML/CSS/JS); local-api.js is the in-browser backend
+scripts/build-static.mjs  builds dist/ for static hosting; wrangler.jsonc = Cloudflare config
 test/                  node --test unit tests
 ```
 

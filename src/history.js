@@ -76,7 +76,14 @@ export function parseViewingHistoryCsv(text) {
   let titleCol = header.indexOf('title');
   let dateCol = header.indexOf('date');
   let body = rows.slice(1);
-  if (titleCol === -1) { titleCol = 0; dateCol = 1; body = rows; }
+  if (titleCol === -1) {
+    // No header row: only accept it when it really looks like "title,date" rows.
+    const dated = rows.filter((r) => r.length >= 2 && parseDate(r[1], false)).length;
+    if (dated < rows.length / 2) return [];
+    titleCol = 0;
+    dateCol = 1;
+    body = rows;
+  }
   return entriesFromRows(body.map((r) => ({ title: r[titleCol], date: dateCol >= 0 ? r[dateCol] : '' })));
 }
 
@@ -157,4 +164,19 @@ export function groupHistory(entries) {
     groups.set(key, g);
   }
   return [...groups.values()].sort((a, b) => (b.lastWatched || '').localeCompare(a.lastWatched || ''));
+}
+
+/** Matches history groups to catalog titles by (alternative) title. */
+export function resolveByTitle(groups, titles) {
+  const index = new Map();
+  for (const t of titles) {
+    for (const name of [t.title, ...(t.aka || [])]) {
+      const key = normalizeTitle(name);
+      if (!index.has(key)) index.set(key, t);
+    }
+  }
+  return groups.map((g) => {
+    const t = index.get(normalizeTitle(g.name));
+    return { ...g, titleId: t && (g.kind !== 'series' || t.type === 'series') ? t.id : null };
+  });
 }

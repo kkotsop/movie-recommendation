@@ -53,3 +53,9 @@ test('normalizeTitle ignores accents, punctuation and &', () => {
   assert.equal(normalizeTitle('Love, Death & Robots'), 'love death and robots');
   assert.equal(normalizeTitle('Pokémon: The Movie'), 'pokemon the movie');
 });
+
+test('files that are not viewing history are rejected, headerless title,date rows are accepted', () => {
+  assert.deepEqual(parseViewingHistoryCsv('hello world\nsome notes'), []);
+  assert.deepEqual(parseViewingHistoryCsv('name,age\nBob,31'), []);
+  assert.equal(parseViewingHistoryCsv('"Roma","12/25/22"\n"Okja","1/2/23"').length, 2);
+});
