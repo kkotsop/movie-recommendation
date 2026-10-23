@@ -6,7 +6,8 @@ import path from 'node:path';
 
 process.env.SWIPEFLICK_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-'));
 process.env.IMDB_RETRY_MS = '1';
-const { buildTmdbCatalog, loadDemoCatalog, resolveByTitle } = await import('../src/catalog.js');
+const { buildTmdbCatalog, loadDemoCatalog, resolveByTitle, resolveHistory } = await import('../src/catalog.js');
+const { readCache } = await import('../src/store.js');
 const { mapDetails } = await import('../src/tmdb.js');
 
 const movie = { id: 1, title: 'Roma', original_title: 'Roma', release_date: '2018-11-21', runtime: 135, genres: [{ name: 'Drama' }], keywords: { keywords: [{ name: 'maid' }] }, credits: { cast: [{ name: 'Yalitza Aparicio' }], crew: [{ job: 'Director', name: 'Alfonso Cuarón' }] }, imdb_id: 'tt6155172', original_language: 'es', poster_path: '/p.jpg', vote_average: 7.7 };
@@ -61,4 +62,36 @@ test('demo catalog loads and history matches alternative titles', () => {
   assert.ok(titles.every((t) => t.imdbId && t.imdbRating && t.genres.length));
   const [g] = resolveByTitle([{ name: 'La casa de papel', kind: 'series' }], titles);
   assert.equal(titles.find((t) => t.id === g.titleId)?.title, 'Money Heist');
+});
+
+test('resolveHistory matches titles on TMDB once, shares the answer, and only fetches what is unknown', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = new URL(url);
+    calls.push(u.pathname);
+    const json = (body) => new Response(JSON.stringify(body), { status: 200 });
+    if (u.hostname === 'datasets.imdbws.com') return new Response('nope', { status: 503 });
+    if (u.pathname === '/3/search/tv') return json({ results: [{ id: 2, name: 'Dark' }] });
+    if (u.pathname === '/3/search/movie') return json({ results: [{ id: 1, title: 'Roma' }] });
+    if (u.pathname === '/3/tv/2') return json(show);
+    if (u.pathname === '/3/movie/1') return json(movie);
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const groups = [{ name: 'Dark', kind: 'series' }, { name: 'Roma', kind: 'movie' }];
+    const first = await resolveHistory({ key: 'k', groups, knownIds: new Set(['tmdb-movie-1']), rate: false });
+    assert.deepEqual(first.ids, ['tmdb-tv-2', 'tmdb-movie-1']);
+    assert.deepEqual(first.extra.map((t) => t.id), ['tmdb-tv-2'], 'Roma is already in the catalog, so only Dark is fetched');
+    assert.equal(first.extra[0].onNetflix, false);
+    assert.ok(readCache('history-titles.json').some((t) => t.id === 'tmdb-tv-2'), 'shared with everyone');
+
+    calls.length = 0;
+    const again = await resolveHistory({ key: 'k', groups, knownIds: new Set(['tmdb-movie-1', 'tmdb-tv-2']), rate: false });
+    assert.deepEqual(again.ids, first.ids);
+    assert.equal(calls.filter((c) => c.includes('/search/')).length, 0, 'the second person pays nothing for the lookup');
+    assert.equal(again.extra.length, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

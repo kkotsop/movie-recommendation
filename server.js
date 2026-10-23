@@ -1,322 +1,306 @@
-// SwipeFlick local server: serves the UI and a small JSON API on 127.0.0.1.
+// SwipeFlick server: serves the app and a stateless JSON API.
+//
+// Nothing about a person is stored here. Each phone keeps its own Netflix history, swipes and
+// settings and sends them along with every request; we compute recommendations and forget them.
+// The only things on disk are shared by everyone: the Netflix catalog, TMDB lookups and ratings.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { loadState, saveState, DEFAULT_SETTINGS } from './src/store.js';
-import { parseViewingHistoryCsv, groupHistory } from './src/history.js';
-import { loadDemoCatalog, buildTmdbCatalog, cachedTmdbCatalog, resolveByTitle, applyTrending, refreshTrending } from './src/catalog.js';
 import { readCache } from './src/store.js';
+import { parseViewingHistoryCsv, groupHistory, normalizeTitle } from './src/history.js';
+import { loadDemoCatalog, buildTmdbCatalog, cachedTmdbCatalog, resolveByTitle, resolveHistory, applyTrending, refreshTrending } from './src/catalog.js';
 import { buildProfile, nextDeck, feelingLucky, dailyPicks, topTastes, explain } from './src/recommender.js';
-import { syncFromNetflix, forgetNetflixLogin } from './src/netflix.js';
 
 const PORT = Number(process.env.PORT) || 4173;
 const HOST = process.env.HOST || '127.0.0.1';
-// Hosted mode: set ACCESS_TOKEN and the API (your history, swipes, TMDB key) needs a login cookie.
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
-const HOSTED = Boolean(ACCESS_TOKEN);
-const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
-const COOKIE = 'sf_auth';
-const sha = (x) => crypto.createHash('sha256').update(x).digest('hex');
-const COOKIE_VALUE = HOSTED ? sha(`${ACCESS_TOKEN}:cookie`) : '';
-const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 
-let state = loadState();
-let catalog;
-const jobs = { netflix: { state: 'idle' }, catalog: { state: 'idle' } };
+// The owner's TMDB key. Visitors never see it, enter it, or need a TMDB account.
+const TMDB_KEY = process.env.TMDB_API_KEY || '';
+const DEFAULT_REGION = /^[A-Za-z]{2}$/.test(process.env.DEFAULT_REGION || '') ? process.env.DEFAULT_REGION.toUpperCase() : 'US';
+// HOSTED=1: reachable by anyone with the link (any Host header, proxy-aware rate limiting).
+const HOSTED = process.env.HOSTED === '1';
+const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+const WEEK = 7 * 86400000;
 
-function setCatalog(source, titles, builtAt = null) {
-  catalog = { source, titles, byId: new Map(titles.map((t) => [t.id, t])), builtAt };
+// ---- shared catalogs (one per Netflix country) -----------------------------
+
+const catalogs = new Map(); // region -> {source, titles, byId, builtAt}
+const jobs = new Map(); // region -> {state, message, progress}
+let buildQueue = Promise.resolve(); // one TMDB build at a time, so we stay inside TMDB's rate limits
+let demo;
+
+const makeCatalog = (source, titles, builtAt = null) => ({ source, titles, byId: new Map(titles.map((t) => [t.id, t])), builtAt });
+const netflixCount = (c) => c.titles.filter((t) => t.onNetflix !== false).length;
+
+function getCatalog(region) {
+  const have = catalogs.get(region);
+  if (have) return have;
+  const cached = TMDB_KEY && cachedTmdbCatalog(region);
+  if (cached) {
+    applyTrending(cached.titles, readCache(`trending-${region}.json`)?.scores); // even yesterday's trend beats none
+    const c = makeCatalog('tmdb', cached.titles, cached.builtAt);
+    catalogs.set(region, c);
+    return c;
+  }
+  demo ||= makeCatalog('demo', loadDemoCatalog());
+  if (TMDB_KEY) startBuild(region); // meanwhile everyone swipes the built-in sample
+  return demo;
 }
 
-function loadCatalog() {
-  const c = state.settings.tmdbKey && cachedTmdbCatalog(state.settings.region);
-  if (c) {
-    // Even yesterday's trending list is a better hint than none.
-    applyTrending(c.titles, readCache(`trending-${state.settings.region}.json`)?.scores);
-    setCatalog('tmdb', c.titles, c.builtAt);
-  } else setCatalog('demo', loadDemoCatalog());
-}
-
-/** Fetches today's trending scores (cached for a day) and applies them to the live catalog. */
-async function refreshTrendingNow(force = false) {
-  const { tmdbKey, region } = state.settings;
-  if (!tmdbKey || catalog.source !== 'tmdb') return;
-  const scores = await refreshTrending({ key: tmdbKey, region, force });
-  if (scores) applyTrending(catalog.titles, scores);
-}
-
-/** History groups with titleId pointing into the current catalog. */
-function resolvedHistory() {
-  const groups = state.history?.groups || [];
-  const byTitle = resolveByTitle(groups, catalog.titles);
-  return groups.map((g, i) => {
-    const stored = catalog.source === 'tmdb' && g.titleId && catalog.byId.has(g.titleId) ? g.titleId : null;
-    return { ...g, titleId: stored || byTitle[i].titleId };
+function startBuild(region, force = false) {
+  if (!TMDB_KEY || jobs.get(region)?.state === 'running') return;
+  jobs.set(region, { state: 'running', message: 'Waiting for its turn…', progress: 0 });
+  buildQueue = buildQueue.then(async () => {
+    try {
+      await buildTmdbCatalog({
+        key: TMDB_KEY, region, force,
+        onProgress: (message, progress) => jobs.set(region, { state: 'running', message, progress }),
+      });
+      const cached = cachedTmdbCatalog(region);
+      const scores = await refreshTrending({ key: TMDB_KEY, region, force });
+      if (scores) applyTrending(cached.titles, scores);
+      const c = makeCatalog('tmdb', cached.titles, cached.builtAt);
+      if (netflixCount(c) < 20) throw new Error(`Netflix has no catalog we can read for ${region}`);
+      catalogs.set(region, c);
+      jobs.set(region, { state: 'done', message: `${netflixCount(c)} Netflix titles ready`, progress: 1 });
+    } catch (err) {
+      jobs.set(region, { state: 'error', message: err.message });
+    }
   });
 }
 
-function context() {
-  const watched = resolvedHistory().filter((g) => g.titleId);
-  const swipes = state.swipes.filter((s) => catalog.byId.has(s.id));
-  return {
+/** Titles someone watched that are no longer on Netflix still shape taste, so every country's catalog learns them. */
+function addHistoryTitles(extra) {
+  for (const c of catalogs.values()) {
+    for (const t of extra) if (!c.byId.has(t.id)) { c.titles.push(t); c.byId.set(t.id, t); }
+  }
+}
+
+let searchIndex = null;
+const searchCache = () => (searchIndex ||= readCache('tmdb-search.json') || {});
+
+/** Matches history groups to catalog titles: TMDB lookups other people already paid for, then plain title matching. */
+function resolveGroups(groups, catalog) {
+  const byTitle = resolveByTitle(groups, catalog.titles);
+  const cache = searchCache();
+  return groups.map((g, i) => {
+    const hit = cache[`${g.kind === 'series' ? 'tv' : 'movie'}|${normalizeTitle(g.name)}`];
+    const id = hit ? `tmdb-${hit.kind}-${hit.id}` : null;
+    return { ...g, titleId: id && catalog.byId.has(id) ? id : byTitle[i].titleId };
+  });
+}
+
+// Keep the catalog fresh without anyone pressing a button: trending daily, the whole catalog weekly.
+setInterval(() => {
+  for (const [region, c] of catalogs) {
+    if (c.source !== 'tmdb') continue;
+    refreshTrending({ key: TMDB_KEY, region }).then((scores) => scores && applyTrending(c.titles, scores)).catch(() => {});
+    if (c.builtAt && Date.now() - c.builtAt > WEEK) startBuild(region, true);
+  }
+}, 6 * 3600000).unref();
+
+// ---- reading what the phone sends ------------------------------------------
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : '');
+const isoDate = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+const ACTIONS = new Set(['like', 'super', 'nope']);
+
+/** Everything about a person arrives in the request body; none of it is trusted or kept. */
+function parseState(body = {}) {
+  const region = /^[A-Z]{2}$/.test(body.region) ? body.region : DEFAULT_REGION;
+  const s = body.settings || {};
+  const settings = {
+    includeWatched: s.includeWatched === true,
+    types: ['both', 'movie', 'series'].includes(s.types) ? s.types : 'both',
+    minRating: Number.isFinite(s.minRating) ? clamp(s.minRating, 0, 9.5) : 0,
+  };
+  const swipes = (Array.isArray(body.swipes) ? body.swipes : []).slice(0, 20000)
+    .filter((x) => x && typeof x.id === 'string' && ACTIONS.has(x.action))
+    .map((x) => ({ id: x.id.slice(0, 64), action: x.action, at: str(x.at, 40) || null }));
+  const groups = (Array.isArray(body.history?.groups) ? body.history.groups : []).slice(0, 3000)
+    .filter((g) => g && typeof g.name === 'string' && g.name)
+    .map((g) => ({
+      name: str(g.name), kind: g.kind === 'series' ? 'series' : 'movie',
+      views: clamp(Math.floor(Number(g.views)) || 1, 1, 100000),
+      firstWatched: isoDate(g.firstWatched), lastWatched: isoDate(g.lastWatched),
+    }));
+  return { region, settings, swipes, groups, excludeIds: new Set((Array.isArray(body.exclude) ? body.exclude : []).slice(0, 500).map((x) => str(x, 64))) };
+}
+
+function contextFrom(body) {
+  const st = parseState(body);
+  const catalog = getCatalog(st.region);
+  const resolved = resolveGroups(st.groups, catalog);
+  const watched = resolved.filter((g) => g.titleId);
+  const swipes = st.swipes.filter((s) => catalog.byId.has(s.id));
+  const ctx = {
     catalog: catalog.titles,
     profile: buildProfile({ byId: catalog.byId, watched, swipes }),
     swipedIds: new Set(swipes.map((s) => s.id)),
     watchedIds: new Set(watched.map((g) => g.titleId)),
-    settings: state.settings,
+    settings: st.settings,
   };
+  return { st, catalog, resolved, swipes, ctx };
 }
 
-function cardFor(ctx, t) {
-  return { ...t, watched: ctx.watchedIds.has(t.id), reason: explain(ctx.profile, t) };
-}
+const cardFor = (ctx, t) => ({ ...t, watched: ctx.watchedIds.has(t.id), reason: explain(ctx.profile, t) });
+const jobFor = (region) => jobs.get(region) || { state: 'idle' };
 
-async function rebuildCatalog({ force = false } = {}) {
-  if (!state.settings.tmdbKey) { loadCatalog(); return; }
-  if (jobs.catalog.state === 'running') return;
-  jobs.catalog = { state: 'running', message: 'Starting…', progress: 0 };
-  try {
-    const { titles, groups } = await buildTmdbCatalog({
-      key: state.settings.tmdbKey,
-      region: state.settings.region,
-      groups: state.history?.groups || [],
-      force,
-      onProgress: (message, progress) => { jobs.catalog = { state: 'running', message, progress }; },
-    });
-    if (state.history) state.history.groups = groups;
-    saveState(state);
-    loadCatalog();
-    await refreshTrendingNow(true);
-    jobs.catalog = { state: 'done', message: `${titles.filter((t) => t.onNetflix).length} Netflix titles ready`, progress: 1 };
-  } catch (err) {
-    jobs.catalog = { state: 'error', message: err.message };
-    loadCatalog();
-  }
-}
+// ---- rate limiting (per client, in memory) -----------------------------------
 
-function importHistory(entries, source) {
-  const previous = new Map((state.history?.groups || []).map((g) => [g.name, g.titleId]));
-  const groups = groupHistory(entries).map((g) => ({ ...g, titleId: previous.get(g.name) ?? null }));
-  state.history = { source, importedAt: new Date().toISOString(), entries: entries.length, groups };
-  state.onboarded = true;
-  saveState(state);
-  if (state.settings.tmdbKey) rebuildCatalog();
-  return state.history;
+const buckets = new Map();
+function allow(key, max, windowMs) {
+  const now = Date.now();
+  const b = buckets.get(key);
+  if (!b || now - b.start >= windowMs) { buckets.set(key, { start: now, count: 1 }); return true; }
+  return ++b.count <= max;
 }
+setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.start > 3600000) buckets.delete(k); }, 600000).unref();
 
-async function runNetflixSync() {
-  if (['launching', 'waiting-login', 'reading'].includes(jobs.netflix.state)) return;
-  const onStatus = (s, message) => { jobs.netflix = { state: s, message }; };
-  try {
-    const entries = await syncFromNetflix(onStatus);
-    const h = importHistory(entries, 'netflix');
-    jobs.netflix = { state: 'done', message: `Imported ${h.entries} views across ${h.groups.length} titles.` };
-  } catch (err) {
-    jobs.netflix = { state: 'error', message: err.message };
-  }
-}
+// The last X-Forwarded-For entry is the one our own proxy added; earlier ones are client-supplied.
+const clientIp = (req) => (HOSTED && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : req.socket.remoteAddress) || '?';
 
-function cookieOf(req, name) {
-  const m = (req.headers.cookie || '').split(/;\s*/).find((c) => c.startsWith(`${name}=`));
-  return m ? decodeURIComponent(m.slice(name.length + 1)) : '';
-}
-const isAuthed = (req) => !HOSTED || same(cookieOf(req, COOKIE), COOKIE_VALUE);
-const isHttps = (req) => req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
-const authCookie = (req) => `${COOKIE}=${COOKIE_VALUE}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${isHttps(req) ? '; Secure' : ''}`;
+// ---- device-to-device transfer codes -------------------------------------------
+// On iPhone the home-screen app can't see data saved in Safari. A code lets someone carry their data across.
+// It is held in memory for 10 minutes, handed over once, then deleted.
+const transfers = new Map();
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from(crypto.randomBytes(8), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
 
-// 10 wrong codes per 10 minutes per client, so the access code can't be guessed.
-const failures = new Map();
-function tooManyFailures(ip) {
-  const f = failures.get(ip);
-  return f && f.count >= 10 && Date.now() - f.first < 600000;
-}
-function noteFailure(ip) {
-  const f = failures.get(ip);
-  if (!f || Date.now() - f.first >= 600000) failures.set(ip, { count: 1, first: Date.now() });
-  else f.count++;
-}
-// The last X-Forwarded-For entry is the one our proxy added; earlier ones are client-supplied and can be forged.
-const clientIp = (req) => (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').pop().trim();
-
-function publicState() {
-  const ctx = context();
-  const watched = resolvedHistory();
-  const count = (a) => state.swipes.filter((s) => s.action === a).length;
-  const { tmdbKey, ...settings } = state.settings;
-  return {
-    settings: { ...settings, hasTmdbKey: Boolean(tmdbKey) },
-    features: { browserLogin: !HOSTED, tmdbKeyEditable: !HOSTED }, // hosted: the owner's key comes from TMDB_API_KEY; visitors never see or enter one
-    onboarded: state.onboarded,
-    catalog: { source: catalog.source, count: catalog.titles.filter((t) => t.onNetflix !== false).length, builtAt: catalog.builtAt },
-    history: state.history && {
-      source: state.history.source,
-      importedAt: state.history.importedAt,
-      entries: state.history.entries,
-      titles: state.history.groups.length,
-      matched: watched.filter((g) => g.titleId).length,
-      recent: watched.slice(0, 12).map((g) => ({ name: g.name, kind: g.kind, views: g.views, lastWatched: g.lastWatched, matched: Boolean(g.titleId) })),
-    },
-    stats: { likes: count('like'), supers: count('super'), nopes: count('nope'), remaining: ctx.catalog.length - ctx.swipedIds.size },
-    taste: topTastes(ctx.profile),
-    jobs,
-  };
-}
-
-// ---- HTTP -------------------------------------------------------------------
+// ---- HTTP ---------------------------------------------------------------------
 
 const send = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
 };
 
-function readBody(req, limit = 25 * 1024 * 1024) {
+function readBody(req, limit = 3 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) { reject(new Error('Upload too large')); req.destroy(); }
+      if (size > limit) { reject(Object.assign(new Error('That is too large'), { status: 413 })); req.destroy(); }
       else chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }
-const readJson = async (req) => JSON.parse((await readBody(req)) || '{}');
-
-// Routes that work before you've unlocked the app.
-const OPEN_ROUTES = new Set(['GET /api/auth', 'POST /api/login']);
+const readJson = async (req, limit) => {
+  const text = await readBody(req, limit);
+  try { return JSON.parse(text || '{}'); } catch { throw Object.assign(new Error('Bad request'), { status: 400 }); }
+};
 
 const routes = {
-  'GET /api/auth': (req) => ({ required: HOSTED, authed: isAuthed(req) }),
-
-  'POST /api/login': async (req, url, res) => {
-    if (!HOSTED) return { ok: true };
-    const ip = clientIp(req);
-    if (tooManyFailures(ip)) return [429, { error: 'Too many wrong codes. Try again in a few minutes.' }];
-    const { code = '' } = await readJson(req);
-    if (!same(sha(String(code)), sha(ACCESS_TOKEN))) {
-      noteFailure(ip);
-      return [401, { error: 'That code is not right.' }];
-    }
-    failures.delete(ip);
-    res.setHeader('set-cookie', authCookie(req));
-    return { ok: true };
+  'GET /api/catalog': (req, url) => {
+    const region = /^[A-Z]{2}$/.test(url.searchParams.get('region')) ? url.searchParams.get('region') : DEFAULT_REGION;
+    const c = getCatalog(region);
+    return { region, source: c.source, count: netflixCount(c), builtAt: c.builtAt, job: jobFor(region), defaultRegion: DEFAULT_REGION };
   },
 
-  'GET /api/state': () => publicState(),
-
-  'GET /api/deck': (req, url) => {
-    const ctx = context();
-    const excludeIds = new Set((url.searchParams.get('exclude') || '').split(',').filter(Boolean));
-    const n = Math.min(30, Number(url.searchParams.get('n')) || 10);
-    return { cards: nextDeck({ ...ctx, excludeIds, n }) };
+  // Summary for the Profile tab and the badges.
+  'POST /api/profile': async (req) => {
+    const body = await readJson(req);
+    const { st, catalog, resolved, ctx } = contextFrom(body);
+    const count = (a) => st.swipes.filter((s) => s.action === a).length;
+    const h = body.history || {};
+    return {
+      catalog: { source: catalog.source, count: netflixCount(catalog), builtAt: catalog.builtAt },
+      job: jobFor(st.region),
+      history: st.groups.length ? {
+        source: str(h.source, 20), importedAt: str(h.importedAt, 40), entries: clamp(Math.floor(Number(h.entries)) || 0, 0, 1e7),
+        titles: st.groups.length, matched: resolved.filter((g) => g.titleId).length,
+        recent: resolved.slice(0, 12).map((g) => ({ name: g.name, kind: g.kind, views: g.views, lastWatched: g.lastWatched, matched: Boolean(g.titleId) })),
+      } : null,
+      stats: { likes: count('like'), supers: count('super'), nopes: count('nope'), remaining: ctx.catalog.length - ctx.swipedIds.size },
+      taste: topTastes(ctx.profile),
+    };
   },
 
-  'POST /api/swipe': async (req) => {
-    const { id, action } = await readJson(req);
-    if (!catalog.byId.has(id) || !['like', 'super', 'nope'].includes(action)) return [400, { error: 'Unknown title or action' }];
-    state.swipes = state.swipes.filter((s) => s.id !== id);
-    state.swipes.push({ id, action, at: new Date().toISOString() });
-    saveState(state);
-    return { ok: true, stats: publicState().stats };
+  'POST /api/deck': async (req) => {
+    const body = await readJson(req);
+    const { st, ctx } = contextFrom(body);
+    return { cards: nextDeck({ ...ctx, excludeIds: st.excludeIds, n: clamp(Math.floor(Number(body.n)) || 10, 1, 30) }) };
   },
 
-  'POST /api/rewind': () => {
-    const last = state.swipes.pop();
-    if (!last) return [404, { error: 'Nothing to rewind' }];
-    saveState(state);
-    const ctx = context();
-    const t = catalog.byId.get(last.id);
-    return { card: t && cardFor(ctx, t), action: last.action };
-  },
-
-  'POST /api/unswipe': async (req) => {
-    const { id } = await readJson(req);
-    state.swipes = state.swipes.filter((s) => s.id !== id);
-    saveState(state);
-    return { ok: true };
-  },
-
-  'GET /api/lucky': (req, url) => {
-    const excludeIds = new Set((url.searchParams.get('exclude') || '').split(',').filter(Boolean));
-    const card = feelingLucky({ ...context(), excludeIds });
+  'POST /api/lucky': async (req) => {
+    const { st, ctx } = contextFrom(await readJson(req));
+    const card = feelingLucky({ ...ctx, excludeIds: st.excludeIds });
     return card ? { card } : [404, { error: 'You have swiped through everything that matches your settings.' }];
   },
 
-  // Same list all day (seeded by the local date), a new one tomorrow.
-  'GET /api/daily': (req, url) => {
-    const d = new Date();
-    const today = url.searchParams.get('date') || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return { date: today, cards: dailyPicks({ ...context(), excludeIds: new Set(), date: today }) };
+  // Same list all day (seeded by the local date the phone sends), a new one tomorrow.
+  'POST /api/daily': async (req) => {
+    const body = await readJson(req);
+    const { ctx } = contextFrom(body);
+    const date = isoDate(body.date) || new Date().toISOString().slice(0, 10);
+    return { date, cards: dailyPicks({ ...ctx, excludeIds: new Set(), date }) };
   },
 
-  'GET /api/likes': () => {
-    const ctx = context();
-    const likes = state.swipes
-      .filter((s) => s.action !== 'nope' && catalog.byId.has(s.id))
-      .reverse()
+  'POST /api/likes': async (req) => {
+    const { catalog, swipes, ctx } = contextFrom(await readJson(req));
+    const likes = swipes.filter((s) => s.action !== 'nope').reverse()
       .map((s) => ({ ...cardFor(ctx, catalog.byId.get(s.id)), action: s.action, at: s.at }));
     return { likes };
   },
 
-  'POST /api/settings': async (req) => {
+  // Full card data for a few ids (used by rewind).
+  'POST /api/cards': async (req) => {
     const body = await readJson(req);
-    const next = { ...state.settings };
-    if (typeof body.includeWatched === 'boolean') next.includeWatched = body.includeWatched;
-    if (['both', 'movie', 'series'].includes(body.types)) next.types = body.types;
-    if (Number.isFinite(body.minRating)) next.minRating = Math.max(0, Math.min(9.5, body.minRating));
-    if (typeof body.region === 'string' && /^[A-Z]{2}$/.test(body.region)) next.region = body.region;
-    if (typeof body.tmdbKey === 'string' && !HOSTED) next.tmdbKey = body.tmdbKey.trim();
-    const catalogChanged = next.tmdbKey !== state.settings.tmdbKey || next.region !== state.settings.region;
-    state.settings = next;
-    saveState(state);
-    if (catalogChanged) rebuildCatalog();
-    return publicState();
+    const { catalog, ctx } = contextFrom(body);
+    const ids = (Array.isArray(body.ids) ? body.ids : []).slice(0, 30).map((x) => str(x, 64));
+    return { cards: ids.filter((id) => catalog.byId.has(id)).map((id) => cardFor(ctx, catalog.byId.get(id))) };
   },
 
-  'POST /api/history/csv': async (req) => {
-    const entries = parseViewingHistoryCsv(await readBody(req));
+  // Parses a Netflix "Viewing activity" CSV into show/movie groups. Nothing is kept.
+  'POST /api/history/import': async (req) => {
+    if (!allow(`import:${clientIp(req)}`, 20, 600000)) return [429, { error: 'Slow down a little and try again in a few minutes.' }];
+    const entries = parseViewingHistoryCsv(await readBody(req, 5 * 1024 * 1024));
     if (!entries.length) return [400, { error: "That file doesn't look like a Netflix viewing history CSV." }];
-    const h = importHistory(entries, 'csv');
-    return { ok: true, entries: h.entries, titles: h.groups.length };
+    return { entries: entries.length, groups: groupHistory(entries).slice(0, 3000) };
   },
 
-  'POST /api/netflix/connect': () => {
-    if (HOSTED) return [400, { error: 'Use the "Sync from Netflix" bookmark on your phone instead.' }];
-    runNetflixSync();
-    return { ok: true };
+  // Looks a batch of watched titles up on TMDB. The answers are shared, so a title only ever costs one lookup.
+  'POST /api/history/resolve': async (req) => {
+    if (!allow(`resolve:${clientIp(req)}`, 60, 600000)) return [429, { error: 'Slow down a little and try again in a few minutes.' }];
+    const st = parseState(await readJson(req));
+    if (!TMDB_KEY) return { resolved: 0, total: 0 };
+    const fresh = st.groups.slice(0, 40);
+    const catalog = getCatalog(st.region);
+    const { ids, extra } = await resolveHistory({ key: TMDB_KEY, groups: fresh, knownIds: new Set(catalog.byId.keys()) });
+    searchIndex = null;
+    addHistoryTitles(extra);
+    return { resolved: ids.filter(Boolean).length, total: fresh.length };
   },
 
-  'POST /api/catalog/refresh': () => {
-    if (HOSTED) return [403, { error: 'The catalog is refreshed automatically every week.' }];
-    rebuildCatalog({ force: true });
-    return { ok: true };
+  'POST /api/transfer': async (req) => {
+    if (!allow(`transfer:${clientIp(req)}`, 10, 600000)) return [429, { error: 'Too many codes. Try again in a few minutes.' }];
+    const body = await readJson(req, 2 * 1024 * 1024);
+    if (typeof body.payload !== 'string' || !body.payload) return [400, { error: 'Nothing to transfer' }];
+    for (const [k, v] of transfers) if (Date.now() > v.expires) transfers.delete(k);
+    if (transfers.size >= 500) return [503, { error: 'Busy. Try again in a few minutes.' }];
+    const code = newCode();
+    transfers.set(code, { payload: body.payload, expires: Date.now() + 600000 });
+    return { code, expiresInMinutes: 10 };
   },
 
-  'POST /api/onboarded': () => {
-    state.onboarded = true;
-    saveState(state);
-    return { ok: true };
-  },
-
-  'POST /api/reset': async (req) => {
-    const { scope = 'swipes' } = await readJson(req);
-    if (scope === 'all') {
-      state = { settings: { ...DEFAULT_SETTINGS, region: state.settings.region, tmdbKey: state.settings.tmdbKey }, swipes: [], history: null, onboarded: false };
-      forgetNetflixLogin();
-    } else {
-      state.swipes = [];
-    }
-    saveState(state);
-    return publicState();
+  'POST /api/transfer/claim': async (req) => {
+    if (!allow(`claim:${clientIp(req)}`, 10, 600000)) return [429, { error: 'Too many tries. Wait a few minutes.' }];
+    const code = str((await readJson(req)).code, 16).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const t = transfers.get(code);
+    if (!t || Date.now() > t.expires) return [404, { error: 'That code is not valid, or it has expired.' }];
+    transfers.delete(code);
+    return { payload: t.payload };
   },
 };
 
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
+const SECURITY = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
 
 function serveStatic(url, res) {
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
@@ -324,7 +308,7 @@ function serveStatic(url, res) {
   if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'Forbidden' });
   fs.readFile(file, (err, data) => {
     if (err) return send(res, 404, { error: 'Not found' });
-    const headers = { 'content-type': `${TYPES[path.extname(file)] || 'application/octet-stream'}; charset=utf-8` };
+    const headers = { ...SECURITY, 'content-type': `${TYPES[path.extname(file)] || 'application/octet-stream'}; charset=utf-8` };
     if (rel === 'sw.js' || rel === 'index.html') headers['cache-control'] = 'no-cache'; // pick up new versions right away
     res.writeHead(200, headers);
     res.end(data);
@@ -332,47 +316,26 @@ function serveStatic(url, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  // Locally: only answer to localhost names, so other websites can't drive this API via DNS rebinding.
-  // Hosted: the access code protects the API, and ALLOWED_HOSTS can pin the domain.
+  // Locally, only answer to localhost names so other websites can't drive this API via DNS rebinding.
   const host = (req.headers.host || '').replace(/:\d+$/, '').toLowerCase();
   const hostOk = ALLOWED_HOSTS.length ? ALLOWED_HOSTS.includes(host) : HOSTED || ['localhost', '127.0.0.1', '[::1]'].includes(host);
   if (!hostOk) return send(res, 403, { error: 'Forbidden host' });
   const url = new URL(req.url, `http://${req.headers.host}`);
-
-  // Private link: /?t=<access code> sets the login cookie and drops the code from the address bar.
-  if (HOSTED && req.method === 'GET' && url.searchParams.has('t')) {
-    const ip = clientIp(req);
-    if (tooManyFailures(ip)) return send(res, 429, { error: 'Too many wrong codes. Try again in a few minutes.' });
-    const ok = same(sha(url.searchParams.get('t')), sha(ACCESS_TOKEN));
-    if (ok) failures.delete(ip); else noteFailure(ip);
-    url.searchParams.delete('t');
-    res.writeHead(302, { location: url.pathname + url.search, ...(ok ? { 'set-cookie': authCookie(req) } : {}) });
-    return res.end();
-  }
-
-  const key = `${req.method} ${url.pathname}`;
-  const handler = routes[key];
+  const handler = routes[`${req.method} ${url.pathname}`];
   if (!handler) return req.method === 'GET' ? serveStatic(url, res) : send(res, 404, { error: 'Not found' });
-  if (!OPEN_ROUTES.has(key) && !isAuthed(req)) return send(res, 401, { error: 'locked' });
+  if (!allow(`api:${clientIp(req)}`, 600, 60000)) return send(res, 429, { error: 'Too many requests. Try again in a minute.' });
   try {
-    const out = await handler(req, url, res);
+    const out = await handler(req, url);
     if (Array.isArray(out)) send(res, out[0], out[1]);
     else send(res, 200, out);
   } catch (err) {
-    send(res, 500, { error: err.message });
+    send(res, err.status || 500, { error: err.status ? err.message : 'Something went wrong' });
   }
 });
 
-loadCatalog();
 server.listen(PORT, HOST, () => {
   console.log(`\n  🔥 SwipeFlick is running at http://localhost:${PORT}\n`);
-  console.log(`  Catalog: ${catalog.source === 'tmdb' ? `TMDB / Netflix ${state.settings.region}` : 'built-in demo (add a TMDB key in Profile for the full Netflix catalog)'}`);
-  if (state.settings.tmdbKey && catalog.source === 'demo') rebuildCatalog();
-  else refreshTrendingNow();
+  console.log(`  Catalog: ${TMDB_KEY ? `TMDB / Netflix (default ${DEFAULT_REGION})` : 'built-in demo (set TMDB_API_KEY for the full Netflix catalog)'}`);
+  console.log("  Personal data: kept on each person's device, not on this server");
+  if (TMDB_KEY) getCatalog(DEFAULT_REGION);
 });
-const WEEK = 7 * 86400000;
-setInterval(() => {
-  refreshTrendingNow().catch(() => {});
-  // Nobody taps "Refresh" in hosted mode, so the server re-reads Netflix's catalog itself once a week.
-  if (state.settings.tmdbKey && catalog.source === 'tmdb' && catalog.builtAt && Date.now() - catalog.builtAt > WEEK) rebuildCatalog({ force: true });
-}, 6 * 3600000).unref();

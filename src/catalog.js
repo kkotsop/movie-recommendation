@@ -59,9 +59,68 @@ async function discover(tmdb, region, onProgress) {
   return [...seen.values()];
 }
 
+async function attachRatings(titles) {
+  const need = titles.filter((t) => t.imdbId && t.imdbRating == null).map((t) => t.imdbId);
+  if (!need.length) return;
+  try {
+    const ratings = await imdbRatings(need);
+    for (const t of titles) {
+      const r = ratings.get(t.imdbId);
+      if (r) { t.imdbRating = r.rating; t.imdbVotes = r.votes; }
+    }
+  } catch (err) {
+    console.warn(`IMDb ratings unavailable (${err.message}); falling back to TMDB scores`);
+  }
+}
+
 /**
- * Full TMDB build. Returns {titles, groups} where groups carry the resolved
- * titleId. Discover results are cached per region for a week.
+ * Matches watch-history groups to TMDB titles (shared cache, so the first person to
+ * watch something pays for the lookup and everyone after gets it free). Titles that are
+ * not in `knownIds` (watched, but not on Netflix now) are fetched so they can still
+ * shape your taste. Returns {ids: [titleId|null per group], extra: [titles]}.
+ */
+export async function resolveHistory({ key, groups, knownIds = new Set(), onProgress, rate = true }) {
+  const tmdb = createTmdb(key);
+  const searchCache = readCache('tmdb-search.json') || {};
+  let done = 0;
+  const ids = await mapLimit(groups, 6, async (g) => {
+    const kind = g.kind === 'series' ? 'tv' : 'movie';
+    const cacheKey = `${kind}|${normalizeTitle(g.name)}`;
+    if (!(cacheKey in searchCache)) {
+      let res = await tmdb.get(`/search/${kind}`, { query: g.name });
+      let hit = bestMatch(res.results || [], g.name);
+      let hitKind = kind;
+      if (!hit) {
+        res = await tmdb.get('/search/multi', { query: g.name });
+        hit = bestMatch((res.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv'), g.name);
+        hitKind = hit?.media_type;
+      }
+      searchCache[cacheKey] = hit ? { kind: hitKind, id: hit.id } : null;
+    }
+    onProgress?.('Matching your viewing history…', ++done / Math.max(1, groups.length));
+    const hit = searchCache[cacheKey];
+    return hit ? `tmdb-${hit.kind}-${hit.id}` : null;
+  });
+  writeCache('tmdb-search.json', searchCache);
+
+  const missing = [...new Set(ids.filter((id) => id && !knownIds.has(id)))];
+  const extra = (await mapLimit(missing, 8, (id) => {
+    const [, kind, tmdbId] = id.split('-');
+    return fetchDetails(tmdb, kind, tmdbId);
+  })).filter(Boolean);
+  for (const t of extra) { t.onNetflix = false; t.netflixUrl = netflixUrl(t.title); }
+  if (rate) await attachRatings(extra);
+  if (extra.length) {
+    const known = new Map((readCache('history-titles.json') || []).map((t) => [t.id, t]));
+    for (const t of extra) known.set(t.id, t);
+    writeCache('history-titles.json', [...known.values()]);
+  }
+  return { ids, extra };
+}
+
+/**
+ * Full TMDB build of one region's Netflix catalog (cached for a week).
+ * `groups` is optional: when given, the history is resolved in the same pass.
  */
 export async function buildTmdbCatalog({ key, region, groups = [], force = false, onProgress }) {
   const tmdb = createTmdb(key);
@@ -81,59 +140,25 @@ export async function buildTmdbCatalog({ key, region, groups = [], force = false
     titles.forEach((t) => { t.onNetflix = true; });
   }
 
-  // Look up what you watched (it may have left Netflix; it still shapes your taste).
-  const searchCache = readCache('tmdb-search.json') || {};
   const recent = groups.slice(0, HISTORY_LIMIT);
-  let done = 0;
-  const resolvedIds = await mapLimit(recent, 6, async (g) => {
-    const kind = g.kind === 'series' ? 'tv' : 'movie';
-    const cacheKey = `${kind}|${normalizeTitle(g.name)}`;
-    if (!(cacheKey in searchCache)) {
-      let res = await tmdb.get(`/search/${kind}`, { query: g.name });
-      let hit = bestMatch(res.results || [], g.name);
-      let hitKind = kind;
-      if (!hit) {
-        res = await tmdb.get('/search/multi', { query: g.name });
-        hit = bestMatch((res.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv'), g.name);
-        hitKind = hit?.media_type;
-      }
-      searchCache[cacheKey] = hit ? { kind: hitKind, id: hit.id } : null;
-    }
-    onProgress?.('Matching your viewing history…', 0.75 + (++done / Math.max(1, recent.length)) * 0.15);
-    const hit = searchCache[cacheKey];
-    return hit ? `tmdb-${hit.kind}-${hit.id}` : null;
-  });
-  writeCache('tmdb-search.json', searchCache);
-
-  const byId = new Map(titles.map((t) => [t.id, t]));
-  const missing = [...new Set(resolvedIds.filter((id) => id && !byId.has(id)))];
-  const extra = (await mapLimit(missing, 8, (id) => {
-    const [, kind, tmdbId] = id.split('-');
-    return fetchDetails(tmdb, kind, tmdbId);
-  })).filter(Boolean);
-  for (const t of extra) { t.onNetflix = false; byId.set(t.id, t); }
-  titles = [...byId.values()];
+  const { ids, extra } = recent.length
+    ? await resolveHistory({ key, groups: recent, knownIds: new Set(titles.map((t) => t.id)), rate: false })
+    : { ids: [], extra: [] };
+  const all = titles.concat(extra.filter((t) => !titles.some((x) => x.id === t.id)));
 
   onProgress?.('Adding IMDb ratings…', 0.92);
-  const needRating = titles.filter((t) => t.imdbId && t.imdbRating == null).map((t) => t.imdbId);
-  try {
-    const ratings = needRating.length ? await imdbRatings(needRating) : new Map();
-    for (const t of titles) {
-      const r = ratings.get(t.imdbId);
-      if (r) { t.imdbRating = r.rating; t.imdbVotes = r.votes; }
-    }
-  } catch (err) {
-    console.warn(`IMDb ratings unavailable (${err.message}); falling back to TMDB scores`);
+  await attachRatings(all);
+  for (const t of all) t.netflixUrl = netflixUrl(t.title);
+
+  writeCache(cacheName, { builtAt: cached?.builtAt || Date.now(), region, titles: all.filter((t) => t.onNetflix) });
+  if (extra.length) {
+    const known = new Map((readCache('history-titles.json') || []).map((t) => [t.id, t]));
+    for (const t of extra) known.set(t.id, t);
+    writeCache('history-titles.json', [...known.values()]);
   }
-  for (const t of titles) t.netflixUrl = netflixUrl(t.title);
 
-  writeCache(cacheName, { builtAt: cached?.builtAt || Date.now(), region, titles: titles.filter((t) => t.onNetflix) });
-  const historyTitles = new Map((readCache('history-titles.json') || []).map((t) => [t.id, t]));
-  for (const t of titles) if (!t.onNetflix) historyTitles.set(t.id, t);
-  writeCache('history-titles.json', [...historyTitles.values()]);
-
-  const resolvedGroups = groups.map((g, i) => ({ ...g, titleId: i < recent.length ? resolvedIds[i] : g.titleId ?? null }));
-  return { titles, groups: resolvedGroups };
+  const resolvedGroups = groups.map((g, i) => ({ ...g, titleId: i < recent.length ? ids[i] : g.titleId ?? null }));
+  return { titles: all, groups: resolvedGroups };
 }
 
 const TRENDING_MAX_AGE = 24 * 3600000;

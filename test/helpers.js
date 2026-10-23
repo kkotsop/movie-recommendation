@@ -16,7 +16,7 @@ export async function startServer(env = {}) {
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swipeflick-api-'));
   const child = spawn(process.execPath, ['server.js'], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', SWIPEFLICK_DATA: dir, TMDB_API_KEY: '', ...env },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', SWIPEFLICK_DATA: dir, TMDB_API_KEY: '', HOSTED: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';

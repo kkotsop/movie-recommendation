@@ -46,6 +46,7 @@ a { color: var(--brand-a); }
 .views { flex: 1; min-height: 0; position: relative; }
 .view { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .view-likes, .view-daily, .view-profile { overflow-y: auto; padding: 4px 16px 24px; }
+.view-likes > *, .view-daily > *, .view-profile > * { flex-shrink: 0; } /* a tall list must scroll, not squash its panels to nothing */
 .view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
 h1 { font-size: 24px; margin: 0; letter-spacing: -.5px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; }
@@ -326,13 +327,10 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .like-card .pg-type { display: none; }
 
 /* hosted lock screen + phone sync sheet */
-.lock-input { height: 50px; border-radius: 99px; border: 0; padding: 0 22px; font-size: 17px; text-align: center; background: rgba(255, 255, 255, .92); color: #0e1014; width: 100%; box-sizing: border-box; }
-.lock-error { margin: 4px 0 0; font-weight: 700; }
 .sync-steps { padding-left: 20px; line-height: 1.5; margin: 6px 0 14px; }
 .sync-steps li { margin-bottom: 10px; }
 .sync-code { width: 100%; box-sizing: border-box; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 11px/1.3 ui-monospace, monospace; padding: 8px; resize: none; }
 .sync-note { font-size: 13px; }
-#lock { z-index: 60; }
 .privacy-note { margin: 18px 0 0; padding: 10px 14px; border-radius: 12px; background: rgba(0, 0, 0, .22); font-size: 13px; line-height: 1.45; text-align: left; }
 .privacy-note-sheet { background: var(--surface-2); color: var(--text); margin: 14px 0 0; }
 .view-daily .view-head { justify-content: flex-start; }
@@ -340,3 +338,4 @@ input[role="switch"]:focus-visible, .pill:focus-visible, .act:focus-visible, .ta
 .about h3 { margin: 16px 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
 .about p { margin: 0 0 8px; line-height: 1.5; }
 .about a { color: var(--brand-a); }
+.transfer-code { font: 800 30px/1.2 ui-monospace, monospace; letter-spacing: 4px; text-align: center; margin: 14px 0 6px; user-select: all; }

@@ -1,5 +1,6 @@
 // SwipeFlick client: Tinder's card stack, gestures and screens for movies & series.
 import { bookmarkletFor } from './netflix-export.js';
+import * as device from './device-store.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -12,12 +13,14 @@ const api = {
       body: body == null ? undefined : raw ? body : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && data.error === 'locked') { showLock(); throw Object.assign(new Error('Locked'), { status: 401 }); }
     if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
     return data;
   },
   get: (p) => api.req('GET', p),
+  /** POST. Without `raw`, `body` is JSON. */
   post: (p, b = {}, raw) => api.req('POST', p, b, raw),
+  /** POST this device's data (history, swipes, settings) so the server can answer; the server keeps none of it. */
+  ask: (p, extra) => api.req('POST', p, device.requestBody(extra)),
 };
 
 const S = {
@@ -29,7 +32,7 @@ const S = {
   likes: [],
   daily: [],
   polling: null,
-  lastJobs: {},
+  importJob: null, // {state, message, progress}: matching your history on first import
   detailFor: null, // {card, from: 'deck'|'likes'}
   swipeCount: 0,
 };
@@ -177,9 +180,9 @@ function layoutDeck() {
 function updateEmptyState() {
   const radar = $('#radar');
   const job = S.state?.jobs.catalog;
-  const building = job?.state === 'running';
+  const building = job?.state === 'running' && !S.queue.length;
   const empty = !S.queue.length;
-  radar.hidden = !empty && !building;
+  radar.hidden = !empty;
   $('#actions').style.visibility = empty ? 'hidden' : '';
   if (radar.hidden) return;
   radar.classList.toggle('still', false);
@@ -188,8 +191,7 @@ function updateEmptyState() {
   if (building) {
     $('#radar-text').textContent = job.message || 'Building your catalog…';
     progress.firstElementChild.style.width = `${Math.round((job.progress || 0) * 100)}%`;
-    radar.style.background = empty ? '' : 'rgba(14,16,20,.82)';
-    radar.style.zIndex = '20';
+    radar.style.background = '';
   } else {
     radar.style.background = '';
     $('#radar-text').textContent = S.refilling ? 'Finding titles for you…' : "You've seen everything that matches your settings. Try loosening your filters — or let luck decide.";
@@ -206,8 +208,8 @@ async function refill(reset = false) {
   S.refilling = true;
   updateEmptyState();
   try {
-    const exclude = [...S.queue.map((c) => c.id), ...S.swipedThisSession].join(',');
-    const { cards } = await api.get(`/api/deck?n=10&exclude=${encodeURIComponent(exclude)}`);
+    const exclude = [...S.queue.map((c) => c.id), ...S.swipedThisSession];
+    const { cards } = await api.ask('/api/deck', { n: 10, exclude });
     const have = new Set(S.queue.map((c) => c.id));
     S.queue.push(...cards.filter((c) => !have.has(c.id)));
   } catch (err) {
@@ -385,8 +387,8 @@ async function commitSwipe(action) {
   layoutDeck();
   if (action === 'super') toast(`⭐ ${card.title} added to Must watch`);
   try {
-    const { stats } = await api.post('/api/swipe', { id: card.id, action });
-    S.state.stats = stats;
+    device.addSwipe(card.id, action);
+    Object.assign(S.state.stats, device.counts());
     updateBadge();
     layoutDeck();
   } catch (err) {
@@ -397,7 +399,10 @@ async function commitSwipe(action) {
 
 async function rewind() {
   try {
-    const { card, action } = await api.post('/api/rewind');
+    const last = device.popSwipe();
+    if (!last) return toast('Nothing to rewind');
+    const { action } = last;
+    const [card] = (await api.ask('/api/cards', { ids: [last.id] })).cards;
     if (!card) return;
     S.swipedThisSession.delete(card.id);
     S.queue = [card, ...S.queue.filter((c) => c.id !== card.id)];
@@ -414,7 +419,7 @@ async function rewind() {
     setTimeout(() => btn.classList.remove('lit'), 300);
     refreshState();
   } catch (err) {
-    toast(err.status === 404 ? 'Nothing to rewind' : err.message);
+    toast(err.message);
   }
 }
 
@@ -426,7 +431,7 @@ async function feelingLucky(exclude = []) {
   btn.classList.add('lit', 'pressed');
   setTimeout(() => btn.classList.remove('lit', 'pressed'), 250);
   try {
-    const { card } = await api.get(`/api/lucky?exclude=${encodeURIComponent(exclude.join(','))}`);
+    const { card } = await api.ask('/api/lucky', { exclude });
     showPick(card, exclude);
   } catch (err) {
     toast(err.message);
@@ -455,7 +460,8 @@ function showPick(t, tried) {
     if (what === 'close') return closePick();
     if (what === 'again') return feelingLucky([...tried, t.id]);
     if (what === 'save') {
-      await api.post('/api/swipe', { id: t.id, action: 'super' });
+      device.addSwipe(t.id, 'super');
+      Object.assign(S.state.stats, device.counts());
       S.swipedThisSession.add(t.id);
       S.queue = S.queue.filter((c) => c.id !== t.id);
       cardEl(t.id)?.remove();
@@ -506,13 +512,14 @@ $('#detail').addEventListener('click', async (e) => {
   const { card, from } = S.detailFor;
   closeSheets();
   if (d === 'remove') {
-    await api.post('/api/unswipe', { id: card.id });
+    device.removeSwipe(card.id);
     S.swipedThisSession.delete(card.id);
     toast(`Removed ${card.title}`);
     await refreshState();
     loadLikes();
   } else if (from === 'daily') {
-    await api.post('/api/swipe', { id: card.id, action: d });
+    device.addSwipe(card.id, d);
+    Object.assign(S.state.stats, device.counts());
     S.swipedThisSession.add(card.id);
     S.queue = S.queue.filter((c) => c.id !== card.id);
     cardEl(card.id)?.remove();
@@ -561,16 +568,18 @@ function renderFilters() {
   $('#region').value = s.region;
   $('#region-note').textContent = S.state.catalog.source === 'tmdb'
     ? 'Only titles streaming on Netflix in this country are shown.'
-    : 'Add a TMDB key in Profile to use the real Netflix catalog for this country. Using the built-in sample for now.';
+    : 'The full Netflix catalog for this country is loading. Until then you can swipe a built-in sample.';
 }
 
 async function saveSettings(patch, reloadDeck = true) {
   try {
-    S.state = await api.post('/api/settings', patch);
-    renderFilters();
-    renderProfile();
+    const d = device.data();
+    const regionChanged = patch.region && patch.region !== d.settings.region;
+    Object.assign(d.settings, patch);
+    device.save();
+    await refreshState();
     if (reloadDeck) refill(true);
-    startPolling();
+    if (regionChanged) startPolling();
   } catch (err) {
     toast(err.message);
   }
@@ -589,7 +598,8 @@ $('#region').addEventListener('change', (e) => saveSettings({ region: e.target.v
 
 async function resetSwipes() {
   if (!confirm('Reset all your swipes? Liked, Must watch and Nope lists are cleared. Your Netflix history stays.')) return;
-  S.state = await api.post('/api/reset', { scope: 'swipes' });
+  device.resetSwipes();
+  await refreshState();
   S.swipedThisSession.clear();
   closeSheets();
   updateBadge();
@@ -599,8 +609,9 @@ async function resetSwipes() {
 }
 
 async function resetAll() {
-  if (!confirm('Reset everything? This clears your swipes and imported Netflix history, and logs this app out of Netflix.')) return;
-  S.state = await api.post('/api/reset', { scope: 'all' });
+  if (!confirm('Reset everything? This clears your swipes and imported Netflix history from this device.')) return;
+  device.resetEverything();
+  await refreshState();
   S.swipedThisSession.clear();
   updateBadge();
   showWelcome();
@@ -611,7 +622,7 @@ async function resetAll() {
 
 async function loadLikes() {
   try {
-    S.likes = (await api.get('/api/likes')).likes;
+    S.likes = (await api.ask('/api/likes')).likes;
   } catch (err) {
     toast(err.message);
   }
@@ -644,9 +655,11 @@ $('#likes-filter').addEventListener('click', (e) => {
 
 // ---------------------------------------------------------------- today's picks
 
+const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
 async function loadDaily() {
   try {
-    const { cards, date } = await api.get('/api/daily');
+    const { cards, date } = await api.ask('/api/daily', { date: localDate() });
     S.daily = cards;
     $('#daily-date').textContent = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
   } catch (err) {
@@ -711,17 +724,16 @@ function renderProfile() {
 
   const h = st.history;
   $('#history').innerHTML = h
-    ? `<p class="muted">${h.source === 'netflix' ? 'Synced from Netflix' : 'Imported from CSV'} ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} matched to the catalog</p>
+    ? `<p class="muted">${h.source === 'bookmark' ? 'Synced from Netflix' : 'Imported from CSV'} ${timeAgo(h.importedAt)} · ${h.entries.toLocaleString()} views · ${h.titles} titles · ${h.matched} matched to the catalog</p>
        ${h.recent.map((r) => `<div class="hist-row"><span class="${r.matched ? '' : 'unmatched'}">${esc(r.name)}</span><small>${r.kind === 'series' ? `${r.views} ep · ` : ''}${r.lastWatched || ''}</small></div>`).join('')}`
-    : '<p class="muted">No history yet. Tap <b>Sync Netflix</b> to log in, or upload the CSV from netflix.com → Account → Viewing activity → Download all.</p>';
+    : '<p class="muted">No history yet. Tap <b>Sync Netflix</b> to bring your viewing history in.</p>';
 
   $('#catalog-info').textContent = st.catalog.source === 'tmdb'
-    ? `Netflix ${REGIONS[st.settings.region] || st.settings.region} via TMDB: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
-    : st.features.tmdbKeyEditable
-      ? `Built-in sample: ${st.catalog.count} Netflix originals with IMDb ratings. Add a free TMDB API key to swipe everything on Netflix in your country, with posters.`
-      : `The full Netflix catalog is still loading. Until then you can swipe a sample of ${st.catalog.count} Netflix originals.`;
-  $('#tmdb-setup').hidden = !st.features.tmdbKeyEditable;
-  $('#tmdb-key').placeholder = st.settings.hasTmdbKey ? '•••••••• (saved — paste a new one to replace)' : 'Paste your TMDB API key or read access token';
+    ? `Netflix ${REGIONS[st.settings.region] || st.settings.region}: ${st.catalog.count} titles, updated ${timeAgo(new Date(st.catalog.builtAt).toISOString())}.`
+    : `Showing a sample of ${st.catalog.count} Netflix originals. The full Netflix catalog for your country is on its way.`;
+  $('#storage-note').textContent = device.isPersistent()
+    ? 'Your history and swipes are saved on this device only. We keep none of it on our servers.'
+    : "This browser isn't saving data (private window?). Your swipes will be lost when you close it.";
   renderJobs();
 }
 
@@ -732,7 +744,7 @@ function statusHtml(job) {
 }
 
 function renderJobs() {
-  const nf = statusHtml(S.state.jobs.netflix);
+  const nf = statusHtml(S.importJob);
   for (const id of ['#welcome-status', '#profile-status']) {
     const el = $(id);
     el.hidden = !nf;
@@ -741,7 +753,7 @@ function renderJobs() {
       el.innerHTML = nf.html;
     }
   }
-  const cat = statusHtml(S.state.jobs.catalog);
+  const cat = S.state.catalog.source === 'tmdb' && !jobRunning(S.state.jobs.catalog) && S.state.jobs.catalog.state !== 'error' ? null : statusHtml(S.state.jobs.catalog);
   const el = $('#catalog-status');
   el.hidden = !cat;
   if (cat) {
@@ -750,44 +762,91 @@ function renderJobs() {
   }
 }
 
-$('#tmdb-save').addEventListener('click', () => {
-  const key = $('#tmdb-key').value.trim();
-  if (!key) return toast('Paste a TMDB key first');
-  $('#tmdb-key').value = '';
-  saveSettings({ tmdbKey: key }, false);
-  toast('Key saved — building your Netflix catalog…');
-});
-$('#catalog-refresh').addEventListener('click', async () => {
-  if (!S.state.settings.hasTmdbKey) return toast('Add a TMDB key first');
-  await api.post('/api/catalog/refresh');
-  startPolling();
-});
 $('#open-about').addEventListener('click', () => openSheet('#sheet-about'));
+
+// ---------------------------------------------------------------- move data between devices
+
+$('#open-transfer').addEventListener('click', () => {
+  $('#transfer-code').hidden = true;
+  $('#transfer-input').value = '';
+  openSheet('#sheet-transfer');
+});
+$('#transfer-send').addEventListener('click', async () => {
+  try {
+    const { code } = await api.post('/api/transfer', { payload: device.exportJson() });
+    const el = $('#transfer-code');
+    el.textContent = code;
+    el.hidden = false;
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('#transfer-claim').addEventListener('click', async () => {
+  const code = $('#transfer-input').value.trim();
+  if (!code) return toast('Enter the code from your other device');
+  if (!confirm("Replace this device's history and swipes with the data from the code?")) return;
+  try {
+    const { payload } = await api.post('/api/transfer/claim', { code });
+    device.replaceAll(JSON.parse(payload));
+    closeSheets();
+    S.swipedThisSession.clear();
+    await refreshState();
+    refill(true);
+    toast('Your data is here');
+  } catch (err) {
+    toast(err.message);
+  }
+});
 $('#reset-swipes').addEventListener('click', resetSwipes);
 $('#reset-all').addEventListener('click', resetAll);
 
 // ---------------------------------------------------------------- history import
 
-async function connectNetflix() {
-  if (S.state && !S.state.features?.browserLogin) return openSyncSheet();
+function connectNetflix() {
+  openSyncSheet();
+}
+
+/** Takes the Netflix viewing list (CSV text), keeps it on this device, then matches titles in the background. */
+async function importHistory(csv, source) {
+  const res = await api.post('/api/history/import', csv, true);
+  const d = device.data();
+  d.history = { source, importedAt: new Date().toISOString(), entries: res.entries, groups: res.groups };
+  d.onboarded = true;
+  device.save();
+  hideWelcome();
+  await refreshState();
+  refill(true);
+  matchHistory(res.groups);
+  return res;
+}
+
+/** The first people to watch a title pay for its TMDB lookup; after that it is shared. Runs in batches so progress shows. */
+async function matchHistory(groups) {
+  if (S.state?.catalog.source !== 'tmdb') return;
+  const batch = 40;
+  const todo = groups.slice(0, 300);
+  S.importJob = { state: 'running', message: 'Matching your viewing history…', progress: 0 };
+  renderJobs();
   try {
-    await api.post('/api/netflix/connect');
-    startPolling();
+    for (let i = 0; i < todo.length; i += batch) {
+      await api.ask('/api/history/resolve', { history: { groups: todo.slice(i, i + batch) } });
+      S.importJob = { state: 'running', message: `Matching your viewing history… ${Math.min(todo.length, i + batch)} of ${todo.length}`, progress: (i + batch) / todo.length };
+      renderJobs();
+    }
+    S.importJob = { state: 'done', message: `Imported ${device.data().history.entries.toLocaleString()} views across ${groups.length} titles.` };
+    await refreshState();
+    refill(true);
   } catch (err) {
-    toast(err.message);
+    S.importJob = { state: 'error', message: err.message };
   }
+  renderJobs();
 }
 
 async function uploadCsv(file) {
   if (!file) return;
   try {
-    const text = await file.text();
-    const res = await api.post('/api/history/csv', text, true);
-    toast(`Imported ${res.entries.toLocaleString()} views across ${res.titles} titles`);
-    hideWelcome();
-    await refreshState();
-    refill(true);
-    startPolling();
+    const res = await importHistory(await file.text(), 'csv');
+    toast(`Imported ${res.entries.toLocaleString()} views across ${res.groups.length} titles`);
   } catch (err) {
     toast(err.message);
   }
@@ -838,41 +897,16 @@ async function importFromHash() {
   history.replaceState(null, '', location.pathname + location.search);
   try {
     const csv = decodeURIComponent(escape(atob(m[1])));
-    const res = await api.post('/api/history/csv', csv, true);
-    toast(`Imported ${res.entries.toLocaleString()} views across ${res.titles} titles`);
-    hideWelcome();
-    await refreshState();
-    refill(true);
-    startPolling();
+    const res = await importHistory(csv, 'bookmark');
+    const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    toast(installed
+      ? `Imported ${res.entries.toLocaleString()} views across ${res.groups.length} titles`
+      : `Imported ${res.groups.length} titles. Using the home-screen app? Profile → Move your data.`);
   } catch (err) {
-    if (err.status !== 401) toast(err.message || 'Could not read that import');
+    toast(err.message || 'Could not read that import');
   }
   return true;
 }
-
-// ---------------------------------------------------------------- lock (hosted mode)
-
-let afterUnlock = null;
-function showLock() {
-  $('#lock').hidden = false;
-  $('#lock-code').focus();
-}
-
-$('#lock-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const err = $('#lock-error');
-  err.hidden = true;
-  try {
-    await api.post('/api/login', { code: $('#lock-code').value });
-    $('#lock').hidden = true;
-    $('#lock-code').value = '';
-    if (afterUnlock) { const go = afterUnlock; afterUnlock = null; go(); }
-    else location.reload();
-  } catch (error) {
-    err.textContent = error.message;
-    err.hidden = false;
-  }
-});
 
 // ---------------------------------------------------------------- welcome
 
@@ -887,14 +921,25 @@ function hideWelcome() {
 $('#welcome-netflix').addEventListener('click', connectNetflix);
 $('#profile-sync').addEventListener('click', connectNetflix);
 $('#welcome-skip').addEventListener('click', async () => {
-  await api.post('/api/onboarded');
+  device.data().onboarded = true;
+  device.save();
   hideWelcome();
 });
 
 // ---------------------------------------------------------------- state & polling
 
 async function refreshState() {
-  S.state = await api.get('/api/state');
+  const d = device.data();
+  const p = await api.ask('/api/profile');
+  S.state = {
+    settings: { ...d.settings, hasTmdbKey: p.catalog.source === 'tmdb' },
+    onboarded: d.onboarded,
+    catalog: p.catalog,
+    history: p.history,
+    stats: p.stats,
+    taste: p.taste,
+    jobs: { catalog: p.job },
+  };
   updateBadge();
   renderFilters();
   renderProfile();
@@ -902,33 +947,31 @@ async function refreshState() {
 }
 
 function jobRunning(j) {
-  return ['running', 'launching', 'waiting-login', 'reading'].includes(j?.state);
+  return j?.state === 'running';
 }
 
+/** While the shared catalog for your country is being built, check on it until it is ready. */
 function startPolling() {
   if (S.polling) return;
   S.polling = setInterval(async () => {
-    const before = S.lastJobs;
-    const st = await refreshState().catch(() => null);
-    if (!st) return;
-    S.lastJobs = structuredClone(st.jobs);
-    const nfDone = jobRunning(before.netflix) && st.jobs.netflix.state === 'done';
-    const catDone = jobRunning(before.catalog) && !jobRunning(st.jobs.catalog);
-    if (nfDone) {
-      toast(st.jobs.netflix.message);
-      hideWelcome();
+    const c = await api.get(`/api/catalog?region=${device.data().settings.region}`).catch(() => null);
+    if (!c) return;
+    const was = S.state.jobs.catalog;
+    S.state.jobs.catalog = c.job;
+    if (jobRunning(was) && !jobRunning(c.job) || (c.source === 'tmdb' && S.state.catalog.source !== 'tmdb')) {
+      if (c.job.state === 'done') toast(`🍿 ${c.job.message}`);
+      await refreshState();
       refill(true);
+      const groups = device.data().history?.groups;
+      if (groups?.length && c.source === 'tmdb') matchHistory(groups);
     }
-    if (catDone) {
-      if (st.jobs.catalog.state === 'done') toast(`🍿 ${st.jobs.catalog.message}`);
-      refill(true);
-    }
+    renderJobs();
     updateEmptyState();
-    if (!jobRunning(st.jobs.netflix) && !jobRunning(st.jobs.catalog)) {
+    if (!jobRunning(c.job)) {
       clearInterval(S.polling);
       S.polling = null;
     }
-  }, 1000);
+  }, 1500);
 }
 
 // ---------------------------------------------------------------- tabs, toast, keys
@@ -1008,21 +1051,17 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- boot
 
 async function init() {
-  const st = await refreshState();
-  S.lastJobs = structuredClone(st.jobs);
-  const phoneOnly = !st.features.browserLogin;
-  if (phoneOnly) {
-    $('#welcome-netflix').textContent = 'Sync from Netflix';
-    $('#profile-sync').lastChild.textContent = 'Sync Netflix';
-    const help = $('.welcome-help');
-    help.querySelector('summary').textContent = 'How does syncing work?';
-    help.innerHTML = help.querySelector('summary').outerHTML + '<p>You save a bookmark once. When you tap it on netflix.com, it reads your <b>Viewing activity</b> in your own signed-in browser and brings the list back here. SwipeFlick never sees your password.</p>';
-  }
-  if (!st.onboarded) {
-    showWelcome();
+  const d = device.data();
+  if (!d.settings.region) {
     const guess = (navigator.language || '').split('-')[1]?.toUpperCase();
-    if (guess && REGIONS[guess] && guess !== st.settings.region && st.settings.region === 'US') await saveSettings({ region: guess }, false);
+    const { defaultRegion } = await api.get('/api/catalog').catch(() => ({ defaultRegion: 'US' }));
+    d.settings.region = guess && REGIONS[guess] ? guess : defaultRegion;
+    device.save();
   }
+  try { navigator.storage?.persist?.(); } catch {} // ask the browser not to clear our data when space is low
+  const st = await refreshState();
+  if (!st.onboarded) showWelcome();
+  if (!device.isPersistent()) toast("This browser isn't saving data, so your swipes won't be kept.");
   await importFromHash();
   await refill(true);
   let seenCoach = false;
@@ -1031,16 +1070,10 @@ async function init() {
     $('#coach').hidden = false;
     setTimeout(hideCoach, 9000);
   }
-  if (jobRunning(st.jobs.netflix) || jobRunning(st.jobs.catalog)) startPolling();
+  if (jobRunning(st.jobs.catalog)) startPolling();
 }
 
-(async () => {
-  try {
-    const auth = await api.get('/api/auth');
-    if (auth.required && !auth.authed) { afterUnlock = init; showLock(); return; }
-  } catch {}
-  init();
-})();
+init();
 
 // ---------------------------------------------------------------- install as an app (PWA)
 

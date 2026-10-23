@@ -1,21 +1,19 @@
-// SwipeFlick service worker: the app opens instantly and works (read-only) without a connection.
+// SwipeFlick service worker: the app opens instantly, even with no connection.
 //  - app shell: cached on install, refreshed in the background on every visit
 //  - posters (TMDB images): cached the first time they are seen
-//  - /api GET: network first, last good answer when offline
-//  - everything else (POST swipes, etc.) goes straight to the network
-const VERSION = 'v4';
+//  - /api: never cached (it carries personal data), so recommendations need a connection
+const VERSION = 'v7';
 const SHELL = `swipeflick-shell-${VERSION}`;
 const IMAGES = `swipeflick-images-${VERSION}`;
-const API = `swipeflick-api-${VERSION}`;
 const MAX_IMAGES = 300;
-const SHELL_FILES = ['/', '/app.css', '/app.js', '/netflix-export.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
+const SHELL_FILES = ['/', '/app.css', '/app.js', '/netflix-export.js', '/device-store.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
-  const keep = new Set([SHELL, IMAGES, API]);
+  const keep = new Set([SHELL, IMAGES]);
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => !keep.has(k)).map((k) => caches.delete(k))))
@@ -27,19 +25,6 @@ async function trim(cacheName, max) {
   const cache = await caches.open(cacheName);
   const keys = await cache.keys();
   await Promise.all(keys.slice(0, Math.max(0, keys.length - max)).map((k) => cache.delete(k)));
-}
-
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  try {
-    const res = await fetch(request);
-    if (res.ok) cache.put(request, res.clone());
-    return res;
-  } catch (err) {
-    const hit = await cache.match(request);
-    if (hit) return hit;
-    throw err;
-  }
 }
 
 async function staleWhileRevalidate(request, cacheName) {
@@ -69,7 +54,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin === self.location.origin) {
-    if (url.pathname.startsWith('/api/')) return void event.respondWith(networkFirst(request, API));
+    if (url.pathname.startsWith('/api/')) return; // personal data: always straight to the network
     if (url.pathname === '/sw.js') return;
     if (request.mode === 'navigate') return void event.respondWith(staleWhileRevalidate(new Request('/'), SHELL));
     return void event.respondWith(staleWhileRevalidate(request, SHELL));

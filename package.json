@@ -1,7 +1,7 @@
 {
   "name": "swipeflick",
   "version": "1.0.0",
-  "description": "Tinder-style swiping for Netflix recommendations, built from your own viewing history and IMDb ratings. Runs locally.",
+  "description": "Swipe through Netflix recommendations built from your own viewing history and IMDb ratings. Your data stays on your phone.",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "optionalDependencies": {
+  "devDependencies": {
     "playwright": "^1.50.0"
   }
 }

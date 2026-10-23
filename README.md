@@ -2,7 +2,7 @@
 
 **Tinder for your Netflix queue.** A local app that reads your Netflix viewing history, looks at what's on Netflix in your country along with IMDb ratings, and deals you one title at a time. **Swipe right** and you'll see more like it. **Swipe left** and it never comes back.
 
-Everything runs on your computer (`http://localhost:4173`). No account, no cloud, no tracking.
+**Your history and swipes stay on your own device.** The server only holds the shared Netflix catalog; it never stores anyone's viewing history, and SwipeFlick never asks for, sees or stores a Netflix password. No account to make, no tracking.
 
 <p align="center"><img src="docs/swipe.png" width="260" alt="Swiping right on a card"> <img src="docs/lucky.png" width="260" alt="I'm feeling lucky result"> <img src="docs/settings.png" width="260" alt="Discovery settings"></p>
 
@@ -17,60 +17,65 @@ Everything runs on your computer (`http://localhost:4173`). No account, no cloud
 | tap bottom / ⌃ | — | `↑` / `↓` | Open / close full details |
 
 Other controls:
-- **Reset**: the ↺ icon in the top bar (or *Discovery settings → Reset swipes*). *Profile → Reset everything* also clears your history and logs the app out of Netflix.
+- **Reset**: *Discovery settings → Reset swipes* clears your swipes. *Profile → Reset everything* also clears your imported history from this device.
 - **Include movies & series I've already watched**: a switch in Discovery settings (the sliders icon). When it's on, rewatches come back about **3× less often** than new titles and carry a "↻ Rewatch" chip.
 - **Show me**: Movies / Series / Both, a minimum IMDb rating, and your Netflix country.
 
-## Quick start
+## Quick start (try it on your computer)
 
 ```bash
 git clone https://github.com/kkotsop/movie-recommendation.git
 cd movie-recommendation
-npm install          # installs Playwright, used only for "Log in with Netflix"
+npm install
 npm start            # → http://localhost:4173
 ```
 
-Requires Node 20+. "Log in with Netflix" uses your installed **Chrome or Edge**. If you have neither, run `npx playwright install chromium` once.
+Requires Node 20+. It works straight away with a built-in sample of 100 Netflix originals that have real IMDb ratings. For **everything on Netflix in your country, with real posters and what's trending**, the owner (you, once) adds a free TMDB key:
 
-It works straight away with a built-in catalog of 100 Netflix originals that have real IMDb ratings. To swipe through **everything on Netflix in your country, with real posters**, add a free TMDB key:
+```bash
+TMDB_API_KEY=your-key npm start
+```
 
-1. Create an account at <https://www.themoviedb.org/> → *Settings → API* → copy the **API Key** (or the API Read Access Token).
-2. In SwipeFlick go to **Profile → Catalog**, paste the key and tap **Save key**. The first build takes about a minute. It is cached for a week.
+Get the key at <https://www.themoviedb.org/settings/api>. **Players never need a TMDB account or key**: only the person running the server sets it, and the app has no field for it. The first catalog build takes about a minute per country; it's cached for a week and refreshed automatically (trending daily).
 
-You can also set it before starting: `TMDB_API_KEY=xxxx npm start`.
+| Environment variable | What it does |
+|---|---|
+| `TMDB_API_KEY` | The owner's TMDB key. Never sent to the browser. |
+| `DEFAULT_REGION` | Netflix country used until someone picks theirs (default `US`). |
+| `HOSTED=1` | Answer to any hostname (set this when it's on the internet). The Dockerfile sets it. |
+| `ALLOWED_HOSTS` | Optional comma-separated hostnames to accept, e.g. `swipeflick.example.com`. |
+| `PORT`, `HOST` | Where to listen (default `127.0.0.1:4173`). |
+| `SWIPEFLICK_DATA` | Folder for the shared catalog cache (default `./data`). Put it on a persistent volume when hosting. |
 
-## Use it on your phone (install as an app)
+## Put it on the internet (so people can install it on their phones)
 
-SwipeFlick is a PWA: open it in your phone's browser and **Add to Home Screen** to get a full-screen app with its own icon. Phones only install PWAs, and only cache them offline, over **HTTPS**, so the server has to run somewhere that has a certificate.
+SwipeFlick is a PWA: open it in a phone browser and **Add to Home Screen** for a full-screen app with its own icon. Phones only install and cache PWAs over **HTTPS**, so run it somewhere that gives you a certificate. The included `Dockerfile` is all a container host (Fly.io, Render, Railway, ...) needs:
 
-1. **Run it somewhere always on.** Any host that runs a container and gives you HTTPS works (Fly.io, Render, Railway, a home server behind Tailscale or a Cloudflare Tunnel). The included `Dockerfile` is all it needs:
+```bash
+docker build -t swipeflick .
+docker run -p 8080:8080 -v swipeflick-data:/data -e TMDB_API_KEY=your-key swipeflick
+```
 
-   ```bash
-   docker build -t swipeflick .
-   docker run -p 8080:8080 -v swipeflick-data:/data \
-     -e ACCESS_TOKEN=pick-a-long-random-code \
-     -e TMDB_API_KEY=your-free-tmdb-key \
-     swipeflick
-   ```
+Keep `/data` on a persistent volume so the catalog survives restarts. Anyone with the link can use it. Cloudflare isn't required; it's only useful in front of the host for DNS, HTTPS and a custom domain.
 
-   Keep `/data` on a persistent volume (it holds your swipes, history and caches).
-2. **Set `ACCESS_TOKEN`.** Without it the app only answers on localhost. With it, the whole API (your history, swipes and TMDB key) needs a login cookie. Your phone asks for the code once. `https://your-app/?t=<code>` also works as a one-tap private link. Wrong codes are rate limited. Optionally pin your domain with `ALLOWED_HOSTS=swipeflick.example.com`.
-3. **Add one free TMDB key, as the owner, once** (`TMDB_API_KEY` on the host). That's what brings real Netflix posters, the full catalog and the trending list. In hosted mode visitors never see a key field and can't change it. The server builds the catalog once, keeps it on the volume, and refreshes it itself every week (trending daily).
-4. **Sync your Netflix history from the phone**, no laptop and no CSV: *Sync from Netflix* shows a one-time bookmark to save. Then open *netflix.com/viewingactivity*, sign in, and tap the bookmark. It reads your list in your own signed-in browser and brings it back to SwipeFlick. Your password never leaves Netflix.
+### Where each person's data lives
 
-> **iPhone note:** save the bookmark in **Safari** (Chrome on iOS doesn't run bookmarklets). Android: Chrome works; type the bookmark's name in the address bar and pick it.
-> The bookmark reads the same Viewing activity page as the desktop sync, so it needs the same upkeep if Netflix changes that page. It has only been tested against a stand-in page, not netflix.com itself.
+Each installed app keeps **its own** Netflix history, swipes and settings in the phone's browser storage. Every request sends what the server needs to work out recommendations, and the server forgets it as soon as it answers (the API tests check that nothing personal reaches disk). Consequences worth knowing:
+
+- Clearing site data or switching phones loses it. Use **Profile → Move your data** to get a one-time code (valid once, for 10 minutes; held in memory only) and enter it on the other device.
+- **iPhone keeps the home-screen app and Safari separate.** The Netflix bookmark runs in Safari, so after syncing, use *Move your data* to carry the history into the home-screen app.
+- Titles someone watched are looked up on TMDB once and the answer is shared, so the first person pays for the lookup and everyone after gets it free. The shared cache holds titles, not who watched them.
 
 ## Getting your Netflix history in
 
-Netflix has no public API, so there are two ways:
+Netflix has no public API and SwipeFlick never asks for your password, so history comes in through **your own signed-in browser**:
 
-1. **Log in with Netflix** (welcome screen or *Profile → Sync Netflix*). A normal browser window opens on netflix.com. **You** type your password and pick your profile on Netflix's own page, so SwipeFlick never sees your credentials. The app then opens your *Viewing activity* page, takes the same CSV that "Download all" gives you, and closes the window. The browser session is kept in `data/browser-profile`, so the next sync won't ask you to log in again (*Reset everything* deletes it).
-2. **Upload the CSV.** On netflix.com go to *Account → Profiles → your profile → Viewing activity → Download all*, then upload `NetflixViewingHistory.csv` or drag it onto the window.
+1. **Sync from Netflix (bookmark).** *Sync from Netflix* shows a one-time bookmark to save (iPhone: do it in **Safari**; Android: Chrome). Open *netflix.com/viewingactivity*, sign in, pick your profile, and tap the bookmark. It reads the same list "Download all" gives you, inside your browser, and brings it back to SwipeFlick. Netflix's password and session never leave netflix.com.
+2. **Upload the CSV** (*Profile → Upload CSV*): on netflix.com go to *Account → Profiles → your profile → Viewing activity → Download all*.
 
 The parser handles US and European date formats and groups episodes into shows ("Dark: Season 2: …" becomes *Dark*). It recognises season markers in English, Greek, German, French, Spanish, Italian and other languages.
 
-> Netflix can change its Viewing activity page at any time. If the automatic sync stops working, the CSV upload still works. Netflix's terms don't allow automated access, and the sync drives a browser that is logged in to your account (you log in yourself). If that worries you, use the CSV upload.
+> Netflix can change its Viewing activity page at any time, which would break the bookmark's page-reading fallback (the CSV upload keeps working). The bookmark has only been tested against a stand-in page, not netflix.com itself. Netflix's terms don't allow automated access, so use the sync at your own discretion.
 
 ## How Tinder works, and how SwipeFlick copies it
 
@@ -122,23 +127,23 @@ SwipeFlick does the same, but for titles, in `src/recommender.js`:
 ## Project layout
 
 ```
-server.js              local HTTP server + JSON API (binds to 127.0.0.1 only)
+server.js              stateless HTTP server + JSON API (keeps nothing about a person)
 src/history.js         Netflix CSV parsing, date-format detection, episode → show grouping
 src/recommender.js     taste vectors, scoring, deck sampling, feeling lucky
 src/catalog.js         TMDB catalog build + history matching, demo catalog
 src/tmdb.js            TMDB client (v3 key or v4 token), detail mapping
 src/imdb.js            IMDb ratings dataset download + lookup
-src/netflix.js         "Log in with Netflix" browser flow (Playwright, desktop only)
-src/store.js           JSON state in ./data (swipes, settings, imported history)
+src/store.js           shared on-disk cache in ./data (catalog, TMDB lookups, ratings)
 public/                the Tinder-style UI (vanilla HTML/CSS/JS, no build step)
 public/sw.js           service worker (offline shell, cached posters)
-public/netflix-export.js  the phone "Sync from Netflix" bookmark
+public/device-store.js    your history, swipes and settings, kept on the device
+public/netflix-export.js  the "Sync from Netflix" bookmark
 scripts/make-icons.js  renders the PNG app icons from public/icon.svg
 Dockerfile             always-on container for the phone setup
 test/                  unit, API, hosted-mode and browser end-to-end tests
 ```
 
-Your data lives in `./data/` (git-ignored): `state.json`, caches, and the Netflix browser profile.
+`./data/` (git-ignored) holds only shared caches: the Netflix catalog, TMDB lookups and IMDb ratings. Personal data never lands there.
 
 ```bash
 npm test      # unit + API + hosted-mode + a phone-sized browser end-to-end run
